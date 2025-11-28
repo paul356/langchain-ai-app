@@ -11,6 +11,9 @@ faiss-cpu==1.8.0
 pypdf2==3.0.1
 python-multipart==0.0.15
 
+# For vector database memory
+chromadb==0.4.22
+
 # For development
 jupyter==1.1.1
 streamlit==1.30.0
