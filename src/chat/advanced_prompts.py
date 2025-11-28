@@ -42,6 +42,14 @@ class AdvancedChatBot:
             "cot": False,  # Chain of thought reasoning
             "context": None,  # User context metadata
         }
+        # Conversation flow settings
+        self.flow_config = {
+            "max_history": 10,  # Maximum exchanges to keep in history
+            "window_size": 5,   # Number of recent exchanges to include in context
+            "detect_topics": False,  # Enable topic change detection
+            "summarize_old": False,  # Summarize old history instead of truncating
+        }
+        self.conversation_summary = None  # Stores summary of older conversations
 
     def _setup_llm(self):
         """Setup LLM - prefer Ollama if configured."""
@@ -60,11 +68,22 @@ class AdvancedChatBot:
             return ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7, api_key=api_key)
 
     def _format_history(self):
-        """Format chat history into a list of messages."""
+        """Format chat history into a list of messages with flow management."""
         messages = []
-        for exchange in self.chat_history:
+
+        # Get relevant history based on flow config
+        window_size = self.flow_config["window_size"]
+        relevant_history = self.chat_history[-window_size:] if window_size > 0 else self.chat_history
+
+        # Add summary of older conversations if enabled and exists
+        if self.conversation_summary and self.flow_config["summarize_old"]:
+            messages.append(AIMessage(content=f"[Previous conversation summary: {self.conversation_summary}]"))
+
+        # Add recent history
+        for exchange in relevant_history:
             messages.append(HumanMessage(content=exchange["user"]))
             messages.append(AIMessage(content=exchange["bot"]))
+
         return messages
 
     def set_role(self, role: str):
@@ -95,19 +114,147 @@ class AdvancedChatBot:
     def clear_history(self):
         """Clear chat history."""
         self.chat_history = []
+        self.conversation_summary = None
         print("🧹 History cleared.")
+
+    def configure_flow(self, max_history: int = None, window_size: int = None,
+                      detect_topics: bool = None, summarize_old: bool = None):
+        """Configure conversation flow settings."""
+        if max_history is not None:
+            self.flow_config["max_history"] = max_history
+        if window_size is not None:
+            self.flow_config["window_size"] = window_size
+        if detect_topics is not None:
+            self.flow_config["detect_topics"] = detect_topics
+        if summarize_old is not None:
+            self.flow_config["summarize_old"] = summarize_old
+        print(f"🔄 Flow config updated: {self.flow_config}")
+
+    def _manage_history_length(self):
+        """Manage history length based on flow config."""
+        max_history = self.flow_config["max_history"]
+        window_size = self.flow_config["window_size"]
+
+        if len(self.chat_history) > max_history:
+            # If summarization is enabled, summarize old messages and truncate to window_size
+            if self.flow_config["summarize_old"]:
+                keep_size = window_size if window_size > 0 else max_history
+                # Summarize everything except the last window_size exchanges
+                old_exchanges = self.chat_history[:-keep_size]
+                self._summarize_history(old_exchanges)
+                # Truncate to window_size
+                self.chat_history = self.chat_history[-keep_size:]
+                print(f"🔄 History summarized and trimmed to last {keep_size} exchanges")
+            else:
+                # Just truncate to max_history without summarizing
+                self.chat_history = self.chat_history[-max_history:]
+                print(f"🔄 History trimmed to last {max_history} exchanges")
+
+    def _summarize_history(self, exchanges: List[Dict[str, str]]):
+        """Summarize old conversation history."""
+        if not exchanges:
+            return
+
+        import re
+
+        # Build conversation text, removing <think> tags from bot responses
+        conv_parts = []
+
+        # Include previous summary if exists
+        if self.conversation_summary:
+            conv_parts.append(f"Previous summary: {self.conversation_summary}\n")
+
+        # Add new exchanges
+        for ex in exchanges:
+            user_msg = ex['user']
+            # Clean bot response of <think> tags
+            bot_msg = re.sub(r'<think>.*?</think>', '', ex['bot'], flags=re.DOTALL).strip()
+            conv_parts.append(f"User: {user_msg}\nAssistant: {bot_msg}")
+
+        conv_text = "\n".join(conv_parts)
+
+        # Create summarization prompt
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Summarize the entire conversation on both sides (including any previous summary) in concise sentences."),
+            ("human", "Conversation:\n{conversation}")
+        ])
+
+        chain = prompt | self.llm | StrOutputParser()
+
+        try:
+            new_summary = chain.invoke({"conversation": conv_text})
+
+            # Clean up the summary - remove <think> tags if still present
+            self.conversation_summary = re.sub(r'<think>.*?</think>', '', new_summary, flags=re.DOTALL).strip()
+
+            print("📝 Previous conversation summarized")
+        except Exception as e:
+            print(f"⚠️  Failed to summarize history: {e}")
+
+    def _detect_topic_change(self, user_input: str) -> bool:
+        """Detect if the user is changing topics."""
+        if not self.chat_history or not self.flow_config["detect_topics"]:
+            return False
+
+        # Get last few exchanges
+        recent_messages = self.chat_history[-3:]
+        recent_text = " ".join([ex["user"] for ex in recent_messages])
+
+        # Build topic detection prompt
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", "Analyze if the new message represents a topic change from the previous conversation. "
+                      "Answer with only 'YES' or 'NO'."),
+            ("human", "Previous conversation: {previous}\n\nNew message: {current}\n\nIs this a topic change?")
+        ])
+
+        chain = prompt | self.llm | StrOutputParser()
+
+        try:
+            result = chain.invoke({"previous": recent_text, "current": user_input})
+            return "YES" in result.upper()
+        except Exception:
+            return False
+
+    def _get_conversation_state(self) -> str:
+        """Get current conversation state."""
+        history_len = len(self.chat_history)
+
+        if history_len == 0:
+            return "greeting"
+        elif history_len < 3:
+            return "opening"
+        else:
+            return "ongoing"
 
     def chat(self, user_input: str) -> str:
         """Main chat entry point that builds prompt from active features."""
         try:
-            response = self._build_and_invoke(user_input)
+            # Validate input
+            if not user_input.strip():
+                return "Please provide a message."
+
+            # Detect topic change if enabled
+            if self._detect_topic_change(user_input):
+                print("🔄 Topic change detected")
+
+            # Get conversation state
+            state = self._get_conversation_state()
+
+            # Build and invoke with state awareness
+            response = self._build_and_invoke(user_input, state)
+
+            # Add to history
             self.chat_history.append({"user": user_input, "bot": response})
+
+            # Manage history length
+            self._manage_history_length()
+
             return response
         except Exception as e:
             return f"Error processing request: {str(e)}"
 
-    def _build_and_invoke(self, user_input: str) -> str:
-        """Build prompt dynamically based on active features."""
+    def _build_and_invoke(self, user_input: str, state: str = "ongoing") -> str:
+        """Build prompt dynamically based on active features and conversation state."""
         # Build system prompt by combining active features
         system_parts = []
 
@@ -121,6 +268,12 @@ class AdvancedChatBot:
             "comedian": "You are a friendly comedian. Respond with humor, wit, and light-heartedness while still being helpful."
         }
         system_parts.append(role_prompts.get(role, role_prompts["helpful_assistant"]))
+
+        # Add conversation state guidance
+        if state == "greeting":
+            system_parts.append("\n\nThis is the start of a new conversation. Be welcoming and establish rapport.")
+        elif state == "opening":
+            system_parts.append("\n\nYou are in the early stages of conversation. Build on previous exchanges naturally.")
 
         # Add CoT instructions if enabled
         if self.features["cot"]:
@@ -292,7 +445,10 @@ def print_help():
     print("                        Roles: helpful_assistant, creative_writer,")
     print("                               technical_expert, philosopher, comedian")
     print("  /cot on|off         - Enable/disable Chain of Thought reasoning")
-    print("  /context on|off     - Enable/disable context-aware mode")
+    print("  /context set        - Set custom context (name, location, interests)")
+    print("  /context off        - Disable context-aware mode")
+    print("  /flow configure     - Configure conversation flow settings")
+    print("  /flow status        - Show flow configuration")
     print("  /few_shot [task]    - Run few-shot learning task")
     print("                        Tasks: classification, translation")
     print("  /structured [query] - Get structured JSON output")
@@ -316,6 +472,12 @@ def demo_advanced_features():
         print(f"✅ Initialized with role: helpful_assistant")
 
         while True:
+            # Clear any buffered input before prompting
+            import sys
+            if sys.stdin.isatty():
+                import termios
+                termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
             user_input = input("\nYou: ").strip()
 
             if not user_input:
@@ -335,19 +497,44 @@ def demo_advanced_features():
 
             if user_input.lower() == '/history':
                 history = chatbot.chat_history
-                if not history:
+                summary = chatbot.conversation_summary
+                flow_config = chatbot.flow_config
+
+                if not history and not summary:
                     print("📝 No chat history yet.")
                 else:
                     print("\n📝 Chat History:")
-                    print("-" * 50)
-                    for i, exchange in enumerate(history, 1):
-                        print(f"{i}. You: {exchange['user']}")
-                        print(f"   Bot: {exchange['bot'][:100]}..." if len(exchange['bot']) > 100 else f"   Bot: {exchange['bot']}")
+                    print("=" * 50)
+
+                    # Show summary first if it exists and summarization is enabled
+                    if summary and flow_config["summarize_old"]:
+                        print("\n[Previous conversation summary]")
+                        print(f"{summary}")
                         print()
+
+                    # Then show recent history
+                    if history:
+                        window_size = flow_config["window_size"]
+                        if window_size > 0 and len(history) > window_size:
+                            print(f"[Showing last {window_size} of {len(history)} exchanges]")
+                            print("-" * 50)
+                            display_history = history[-window_size:]
+                            start_idx = len(history) - window_size + 1
+                        else:
+                            display_history = history
+                            start_idx = 1
+
+                        for i, exchange in enumerate(display_history, start_idx):
+                            print(f"{i}. You: {exchange['user']}")
+                            print(f"   Bot: {exchange['bot'][:100]}..." if len(exchange['bot']) > 100 else f"   Bot: {exchange['bot']}")
+                            print()
+
+                    print("=" * 50)
                 continue
 
             if user_input.lower() == '/status':
                 features = chatbot.features
+                flow = chatbot.flow_config
 
                 print("\n📊 Active Features:")
                 print("=" * 50)
@@ -357,6 +544,13 @@ def demo_advanced_features():
                     print(f"📍 Context: {features['context']}")
                 else:
                     print("📍 Context: ❌ OFF")
+                print(f"\n💬 Conversation Flow:")
+                print(f"  - History: {len(chatbot.chat_history)}/{flow['max_history']} exchanges")
+                print(f"  - Window Size: {flow['window_size']} exchanges")
+                print(f"  - Topic Detection: {'✅ ON' if flow['detect_topics'] else '❌ OFF'}")
+                print(f"  - Summarization: {'✅ ON' if flow['summarize_old'] else '❌ OFF'}")
+                if chatbot.conversation_summary:
+                    print(f"  - Summary exists: ✅")
                 print("=" * 50)
                 continue
 
@@ -382,19 +576,62 @@ def demo_advanced_features():
             if user_input.lower().startswith('/context'):
                 parts = user_input.split()
                 if len(parts) < 2:
-                    print("⚠️  Usage: /context on|off")
+                    print("⚠️  Usage: /context set | /context off")
                     continue
-                if parts[1].lower() == 'on':
+                if parts[1].lower() == 'set':
+                    print("\n📝 Setting Context Information:")
+                    print("-" * 50)
+                    name = input("User Name: ").strip() or "User"
+                    location = input("Location: ").strip() or "Unknown"
+                    interests = input("Interests: ").strip() or "Various topics"
+
                     context = {
-                        "user_name": "Alice",
-                        "location": "Wonderland",
-                        "interests": "Exploration, Riddles"
+                        "user_name": name,
+                        "location": location,
+                        "interests": interests
                     }
                     chatbot.set_context(context)
                 elif parts[1].lower() == 'off':
                     chatbot.clear_context()
                 else:
-                    print("⚠️  Usage: /context on|off")
+                    print("⚠️  Usage: /context set | /context off")
+                continue
+
+            if user_input.lower().startswith('/flow'):
+                parts = user_input.split()
+                if len(parts) < 2:
+                    print("⚠️  Usage: /flow configure | /flow status")
+                    continue
+
+                if parts[1].lower() == 'configure':
+                    print("\n⚙️  Configure Conversation Flow:")
+                    print("-" * 50)
+
+                    max_hist = input(f"Max history (current: {chatbot.flow_config['max_history']}): ").strip()
+                    window = input(f"Window size (current: {chatbot.flow_config['window_size']}): ").strip()
+                    topics = input(f"Detect topics? (current: {chatbot.flow_config['detect_topics']}) [yes/no]: ").strip().lower()
+                    summarize = input(f"Summarize old messages? (current: {chatbot.flow_config['summarize_old']}) [yes/no]: ").strip().lower()
+
+                    chatbot.configure_flow(
+                        max_history=int(max_hist) if max_hist else None,
+                        window_size=int(window) if window else None,
+                        detect_topics=topics == 'yes' if topics else None,
+                        summarize_old=summarize == 'yes' if summarize else None
+                    )
+                elif parts[1].lower() == 'status':
+                    flow = chatbot.flow_config
+                    print("\n💬 Conversation Flow Configuration:")
+                    print("=" * 50)
+                    print(f"  Max History: {flow['max_history']} exchanges")
+                    print(f"  Window Size: {flow['window_size']} exchanges")
+                    print(f"  Topic Detection: {'✅ ON' if flow['detect_topics'] else '❌ OFF'}")
+                    print(f"  Summarization: {'✅ ON' if flow['summarize_old'] else '❌ OFF'}")
+                    print(f"  Current History: {len(chatbot.chat_history)} exchanges")
+                    if chatbot.conversation_summary:
+                        print(f"\n📝 Summary: {chatbot.conversation_summary[:100]}...")
+                    print("=" * 50)
+                else:
+                    print("⚠️  Usage: /flow configure | /flow status")
                 continue
 
             if user_input.lower().startswith('/few_shot'):

@@ -9,10 +9,10 @@ A gradually increasing complexity AI application built with LangChain, starting 
 - [x] LangChain installation
 - [x] Simple LLM chat
 
-### 🔄 Phase 2: Chat Application
+### ✅ Phase 2: Chat Application
 - [x] Basic chat with OpenAI/Local LLM
 - [x] Prompt templates
-- [ ] Conversation flow
+- [x] Conversation flow
 
 ### 📝 Phase 3: Memory & Context
 - [ ] Conversation memory
