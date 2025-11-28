@@ -10,8 +10,10 @@ from dotenv import load_dotenv
 from langchain_core.prompts import (
     ChatPromptTemplate, 
     PromptTemplate,
-    FewShotPromptTemplate
+    FewShotPromptTemplate,
+    MessagesPlaceholder
 )
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from pydantic import BaseModel, Field
@@ -33,6 +35,10 @@ class AdvancedChatBot:
         """Initialize with different prompting strategies."""
         self.model_type = model_type
         self.llm = self._setup_llm()
+        self.chat_history = []
+        # Default to role mode with helpful_assistant
+        self.current_mode = "role"
+        self.mode_settings = {"role": "helpful_assistant"}
     
     def _setup_llm(self):
         """Setup LLM - prefer Ollama if configured."""
@@ -49,36 +55,152 @@ class AdvancedChatBot:
             if not api_key:
                 raise ValueError("OPENAI_API_KEY not found")
             return ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7, api_key=api_key)
-    
-    def role_based_chat(self, user_input: str, role: str = "helpful_assistant") -> str:
-        """Chat with different AI personalities/roles."""
+
+    def _format_history(self):
+        """Format chat history into a list of messages."""
+        messages = []
+        for exchange in self.chat_history:
+            messages.append(HumanMessage(content=exchange["user"]))
+            messages.append(AIMessage(content=exchange["bot"]))
+        return messages
+
+    def set_mode(self, mode: str, **kwargs):
+        """Set the current chat mode and settings."""
+        if mode == "standard":
+            mode = "role"
+            kwargs = {"role": "helpful_assistant"}
+            
+        self.current_mode = mode
+        self.mode_settings = kwargs
+        print(f"🔄 Switched to '{mode}' mode.")
+
+    def clear_history(self):
+        """Clear chat history."""
+        self.chat_history = []
+        print("🧹 History cleared.")
+
+    def chat(self, user_input: str) -> str:
+        """Main chat entry point that routes to specific handlers."""
+        try:
+            if self.current_mode == "role":
+                response = self._chat_role(user_input)
+            elif self.current_mode == "cot":
+                response = self._chat_cot(user_input)
+            elif self.current_mode == "context":
+                response = self._chat_context(user_input)
+            elif self.current_mode == "few_shot":
+                # Few shot is usually stateless/task-based, but we can wrap it
+                response = self.few_shot_learning(user_input, self.mode_settings.get("task_type", "classification"))
+            elif self.current_mode == "structured":
+                # Structured output returns an object, we'll format it to string
+                result = self.structured_output(user_input)
+                response = f"Response: {result.response}\nTone: {result.tone}\nConfidence: {result.confidence}"
+            else:
+                # Default fallback
+                response = self._chat_role(user_input)
+
+            # Store history (except for maybe structured/few-shot if we want to keep them separate, but let's store all for now)
+            self.chat_history.append({"user": user_input, "bot": response})
+            return response
+
+        except Exception as e:
+            return f"Error processing request: {str(e)}"
+
+    def _chat_role(self, user_input: str) -> str:
+        """Role-based chat with history."""
+        role = self.mode_settings.get("role", "helpful_assistant")
         
         role_prompts = {
-            "helpful_assistant": """You are a helpful and knowledgeable assistant. 
-            Provide clear, accurate, and friendly responses.""",
-            
-            "creative_writer": """You are a creative writer and storyteller. 
-            Respond with imagination, vivid descriptions, and engaging narratives.""",
-            
-            "technical_expert": """You are a technical expert and engineer. 
-            Provide precise, detailed, and technically accurate responses with examples.""",
-            
-            "philosopher": """You are a wise philosopher. 
-            Respond with deep thoughts, ask meaningful questions, and explore ideas thoroughly.""",
-            
-            "comedian": """You are a friendly comedian. 
-            Respond with humor, wit, and light-heartedness while still being helpful."""
+            "helpful_assistant": "You are a helpful and knowledgeable assistant. Provide clear, accurate, and friendly responses.",
+            "creative_writer": "You are a creative writer and storyteller. Respond with imagination, vivid descriptions, and engaging narratives.",
+            "technical_expert": "You are a technical expert and engineer. Provide precise, detailed, and technically accurate responses with examples.",
+            "philosopher": "You are a wise philosopher. Respond with deep thoughts, ask meaningful questions, and explore ideas thoroughly.",
+            "comedian": "You are a friendly comedian. Respond with humor, wit, and light-heartedness while still being helpful."
         }
         
         system_prompt = role_prompts.get(role, role_prompts["helpful_assistant"])
         
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
+            MessagesPlaceholder(variable_name="history"),
             ("human", "{input}")
         ])
         
-        chain = prompt | self.llm | StrOutputParser()
-        return chain.invoke({"input": user_input})
+        chain = (
+            {
+                "input": RunnablePassthrough(),
+                "history": lambda x: self._format_history()
+            }
+            | prompt
+            | self.llm
+            | StrOutputParser()
+        )
+        return chain.invoke(user_input)
+
+    def _chat_cot(self, user_input: str) -> str:
+        """Chain of thought chat."""
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are an expert problem solver. When given a problem, think through it step by step.
+            
+            Format your response as:
+            **Problem Analysis:** [Break down the problem]
+            **Step-by-step Solution:** [Numbered steps]
+            **Final Answer:** [Conclusion]
+            
+            Think carefully and show your reasoning at each step."""),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{input}")
+        ])
+        
+        chain = (
+            {
+                "input": RunnablePassthrough(),
+                "history": lambda x: self._format_history()
+            }
+            | prompt
+            | self.llm
+            | StrOutputParser()
+        )
+        return chain.invoke(user_input)
+
+    def _chat_context(self, user_input: str) -> str:
+        """Context-aware chat."""
+        context = self.mode_settings.get("context", {})
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are an intelligent assistant. Use the provided context to give more relevant and personalized responses.
+            
+            Context Information:
+            - User Name: {user_name}
+            - Location: {location}
+            - Interests: {interests}
+            
+            Use this context naturally in your response when relevant."""),
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{input}")
+        ])
+        
+        # Prepare context with defaults
+        input_dict = {
+            "user_name": context.get("user_name", "User"),
+            "location": context.get("location", "Unknown"),
+            "interests": context.get("interests", "Various topics"),
+            "input": user_input
+        }
+        
+        chain = (
+            {
+                "input": lambda x: x["input"],
+                "user_name": lambda x: x["user_name"],
+                "location": lambda x: x["location"],
+                "interests": lambda x: x["interests"],
+                "history": lambda x: self._format_history()
+            }
+            | prompt
+            | self.llm
+            | StrOutputParser()
+        )
+        return chain.invoke(input_dict)
     
     def few_shot_learning(self, user_input: str, task_type: str = "classification") -> str:
         """Demonstrate few-shot learning with examples."""
@@ -132,32 +254,6 @@ class AdvancedChatBot:
         chain = few_shot_prompt | self.llm | StrOutputParser()
         return chain.invoke({"input": user_input})
     
-    def chain_of_thought(self, problem: str) -> str:
-        """Implement chain-of-thought reasoning."""
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert problem solver. When given a problem, think through it step by step.
-            
-            Format your response as:
-            
-            **Problem Analysis:**
-            [Break down the problem]
-            
-            **Step-by-step Solution:**
-            1. [First step and reasoning]
-            2. [Second step and reasoning]
-            3. [Continue as needed]
-            
-            **Final Answer:**
-            [Your conclusion]
-            
-            Think carefully and show your reasoning at each step."""),
-            ("human", "{problem}")
-        ])
-        
-        chain = prompt | self.llm | StrOutputParser()
-        return chain.invoke({"problem": problem})
-    
     def structured_output(self, user_input: str) -> PersonalityResponse:
         """Generate structured output using Pydantic models."""
         
@@ -180,110 +276,156 @@ class AdvancedChatBot:
         )
         
         return chain.invoke(user_input)
-    
-    def context_aware_chat(self, user_input: str, context: Dict[str, Any]) -> str:
-        """Chat with additional context information."""
-        
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an intelligent assistant. Use the provided context to give more relevant and personalized responses.
-            
-            Context Information:
-            - User Name: {user_name}
-            - Location: {location}
-            - Interests: {interests}
-            - Previous Topic: {previous_topic}
-            
-            Use this context naturally in your response when relevant."""),
-            ("human", "{input}")
-        ])
-        
-        chain = prompt | self.llm | StrOutputParser()
-        
-        # Prepare context with defaults
-        context_with_defaults = {
-            "user_name": context.get("user_name", "User"),
-            "location": context.get("location", "Unknown"),
-            "interests": context.get("interests", "Various topics"),
-            "previous_topic": context.get("previous_topic", "None"),
-            "input": user_input
-        }
-        
-        return chain.invoke(context_with_defaults)
+
+
+def print_help():
+    """Print the help message with all available commands."""
+    print("\n📚 Available Commands:")
+    print("=" * 50)
+    print("  /mode role [role]   - Switch to role mode")
+    print("                        Roles: helpful_assistant, creative_writer,")
+    print("                               technical_expert, philosopher, comedian")
+    print("  /mode cot           - Chain of Thought reasoning mode")
+    print("  /mode context       - Context-aware chat with user metadata")
+    print("  /mode few_shot      - Few-shot learning mode")
+    print("                        Tasks: classification, translation")
+    print("  /mode structured    - Structured JSON output mode")
+    print("  /mode standard      - Standard chat mode (alias for helpful_assistant)")
+    print("  /status             - Show current mode and settings")
+    print("  /history            - Display all chat messages")
+    print("  /clear              - Clear chat history")
+    print("  /help               - Show this help message")
+    print("  /quit               - Exit the chatbot")
+    print("=" * 50)
 
 
 def demo_advanced_features():
-    """Demonstrate advanced prompting features."""
-    print("🧠 Advanced LangChain Prompting Demo")
+    """Run the advanced chatbot in interactive mode."""
+    print("🧠 Advanced LangChain Chatbot")
     print("=" * 50)
+    print("Commands:")
+    print("  /mode role [role]   - Switch to role mode (helpful_assistant, creative_writer, technical_expert, philosopher, comedian)")
+    print("  /mode cot           - Switch to Chain of Thought mode")
+    print("  /mode context       - Switch to Context-Aware mode")
+    print("  /mode few_shot      - Switch to Few-Shot Learning mode")
+    print("  /mode structured    - Switch to Structured Output mode")
+    print("  /mode standard      - Switch to Standard Chat mode")
+    print("  /status             - Show current mode and settings")
+    print("  /history            - Show chat history")
+    print("  /clear              - Clear chat history")
+    print("  /help               - Show this help message")
+    print("  /quit               - Exit")
+    print("-" * 50)
     
     try:
         chatbot = AdvancedChatBot()
+        print(f"✅ Initialized in 'role' mode (helpful_assistant).")
         
-        # 1. Role-based chat
-        print("\n1. 🎭 Role-based Chat:")
-        print("-" * 30)
-        user_question = "How can I improve my programming skills?"
-        
-        roles = ["helpful_assistant", "technical_expert", "philosopher"]
-        for role in roles:
-            print(f"\n{role.replace('_', ' ').title()}:")
-            response = chatbot.role_based_chat(user_question, role)
-            print(response[:200] + "..." if len(response) > 200 else response)
-        
-        # 2. Few-shot learning
-        print("\n\n2. 🎯 Few-shot Learning:")
-        print("-" * 30)
-        
-        # Sentiment classification
-        print("\nSentiment Classification:")
-        text = "This movie was incredible! The acting was superb."
-        result = chatbot.few_shot_learning(text, "classification")
-        print(f"Text: {text}")
-        print(f"Sentiment: {result}")
-        
-        # Translation
-        print("\nTranslation:")
-        text = "I am learning Python"
-        result = chatbot.few_shot_learning(text, "translation")
-        print(f"English: {text}")
-        print(f"French: {result}")
-        
-        # 3. Chain of thought
-        print("\n\n3. 🔗 Chain of Thought Reasoning:")
-        print("-" * 30)
-        problem = "If I have 15 apples and give away 1/3 of them, then buy 8 more apples, how many apples do I have?"
-        response = chatbot.chain_of_thought(problem)
-        print(response)
-        
-        # 4. Structured output
-        print("\n\n4. 📊 Structured Output:")
-        print("-" * 30)
-        try:
-            response = chatbot.structured_output("Tell me about artificial intelligence")
-            print(f"Response: {response.response[:100]}...")
-            print(f"Tone: {response.tone}")
-            print(f"Confidence: {response.confidence}")
-        except Exception as e:
-            print(f"Structured output failed: {e}")
-        
-        # 5. Context-aware chat
-        print("\n\n5. 🎯 Context-aware Chat:")
-        print("-" * 30)
-        context = {
-            "user_name": "Alice",
-            "location": "San Francisco",
-            "interests": "Machine learning, hiking, photography",
-            "previous_topic": "Python programming"
-        }
-        response = chatbot.context_aware_chat(
-            "What should I do this weekend?", 
-            context
-        )
-        print(response)
-        
+        while True:
+            user_input = input("\nYou: ").strip()
+            
+            if not user_input:
+                continue
+                
+            if user_input.lower() == '/quit':
+                print("👋 Goodbye!")
+                break
+                
+            if user_input.lower() == '/clear':
+                chatbot.clear_history()
+                continue
+
+            if user_input.lower() == '/help':
+                print_help()
+                continue
+
+            if user_input.lower() == '/history':
+                history = chatbot.chat_history
+                if not history:
+                    print("📝 No chat history yet.")
+                else:
+                    print("\n📝 Chat History:")
+                    print("-" * 50)
+                    for i, exchange in enumerate(history, 1):
+                        print(f"{i}. You: {exchange['user']}")
+                        print(f"   Bot: {exchange['bot'][:100]}..." if len(exchange['bot']) > 100 else f"   Bot: {exchange['bot']}")
+                        print()
+                continue
+
+            if user_input.lower() == '/status':
+                mode = chatbot.current_mode
+                settings = chatbot.mode_settings
+                
+                print(f"📊 Current Mode: {mode.upper()}")
+                
+                if mode == "role":
+                    role = settings.get('role', 'unknown')
+                    print(f"ℹ️  Description: Persona-based chat. Active Role: {role}")
+                elif mode == "cot":
+                    print("ℹ️  Description: Chain of Thought. The model explains its reasoning step-by-step.")
+                elif mode == "context":
+                    print("ℹ️  Description: Context-aware chat. Injects hidden user metadata into the prompt.")
+                elif mode == "few_shot":
+                    task = settings.get('task_type', 'unknown')
+                    print(f"ℹ️  Description: Few-shot learning. Task: {task}")
+                elif mode == "structured":
+                    print("ℹ️  Description: Structured Output. Returns parsed JSON with 'response', 'tone', and 'confidence'.")
+                
+                if settings:
+                    print(f"⚙️  Raw Settings: {settings}")
+                continue
+                
+            if user_input.lower().startswith('/mode'):
+                parts = user_input.split()
+                if len(parts) < 2:
+                    print("⚠️  Usage: /mode [mode_name] [args]")
+                    print_help()
+                    continue
+                
+                mode = parts[1]
+                
+                if mode == 'role':
+                    role = parts[2] if len(parts) > 2 else "helpful_assistant"
+                    chatbot.set_mode("role", role=role)
+                elif mode == 'cot':
+                    chatbot.set_mode("cot")
+                elif mode == 'context':
+                    # For demo purposes, we'll use a fixed context
+                    context = {
+                        "user_name": "Alice",
+                        "location": "Wonderland",
+                        "interests": "Exploration, Riddles"
+                    }
+                    chatbot.set_mode("context", context=context)
+                    print(f"Context set to: {context}")
+                elif mode == 'few_shot':
+                    task = parts[2] if len(parts) > 2 else "classification"
+                    chatbot.set_mode("few_shot", task_type=task)
+                    print(f"Task type set to: {task}")
+                elif mode == 'structured':
+                    chatbot.set_mode("structured")
+                elif mode == 'standard':
+                    chatbot.set_mode("standard")
+                else:
+                    print(f"⚠️  Unknown mode: {mode}")
+                    print_help()
+                continue
+            
+            # Check for unrecognized commands
+            if user_input.startswith('/'):
+                print(f"⚠️  Unrecognized command: {user_input}")
+                print_help()
+                continue
+            
+            # Process chat
+            print("🤖 Bot: ", end="", flush=True)
+            response = chatbot.chat(user_input)
+            print(response)
+            
     except Exception as e:
-        print(f"❌ Error in demo: {e}")
-        print("Make sure your API keys are set up correctly!")
+        print(f"❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
