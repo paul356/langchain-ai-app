@@ -52,8 +52,6 @@ def main():
         
         else:
             print("❌ Invalid choice. Please enter 1, 2, or 3.")
-        
-        input("\nPress Enter to continue...")
 
 
 if __name__ == "__main__":
