@@ -1,8 +1,9 @@
 langchain==1.0.2
 langchain-openai==1.0.1
 langchain-community==0.4.1
-langchain-ollama==0.2.7
+langchain-ollama==0.3.10
 python-dotenv==1.2.1
+pydantic>=2.0.0
 fastapi==0.120.1
 uvicorn==0.38.0
 
@@ -13,6 +14,7 @@ python-multipart==0.0.15
 
 # For vector database memory
 chromadb==0.4.22
+langchain-chroma>=0.1.0
 
 # For development
 jupyter==1.1.1

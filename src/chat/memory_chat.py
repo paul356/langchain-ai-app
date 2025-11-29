@@ -9,8 +9,8 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from dotenv import load_dotenv
 
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_ollama import OllamaEmbeddings
+from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 
@@ -225,8 +225,10 @@ class VectorMemoryChat:
             query=query,
             k=k,
             filter={
-                "user_id": self.user_id,
-                "session_id": self.session_id
+                "$and": [
+                    {"user_id": {"$eq": self.user_id}},
+                    {"session_id": {"$eq": self.session_id}}
+                ]
             }
         )
 
