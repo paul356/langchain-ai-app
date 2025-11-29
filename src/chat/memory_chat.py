@@ -314,40 +314,70 @@ class VectorMemoryChat:
         print(f"🗑️  Current session cleared (history preserved in vector store)")
 
 
+def print_help():
+    """Print the help message with all available commands."""
+    print("\n📚 Available Commands:")
+    print("=" * 60)
+    print("  /new                - Start a new chat session")
+    print("  /resume             - Resume a previous session")
+    print("  /list               - List all sessions")
+    print("  /info               - View current session info")
+    print("  /clear              - Clear current session memory")
+    print("  /context on|off     - Toggle context retrieval")
+    print("  /help               - Show this help message")
+    print("  /quit               - Exit the chatbot")
+    print("=" * 60)
+
+
 def main():
     """Demo the vector memory chat system."""
     print("=" * 60)
     print("Vector Memory Chat System")
     print("=" * 60)
+    print("Type /help for available commands")
+    print("-" * 60)
 
     # Initialize chat
     chat = VectorMemoryChat(user_id="alice")
+    use_context = True
 
-    # Show menu
+    # Start with a new session automatically
+    chat.new_session()
+
+    # Single-level chat loop with commands
     while True:
-        print("\n" + "=" * 60)
-        print("Options:")
-        print("1. Start new chat session")
-        print("2. Resume previous session")
-        print("3. List all sessions")
-        print("4. Chat")
-        print("5. View session info")
-        print("6. Exit")
-        print("=" * 60)
+        # Flush any incomplete input before prompting
+        import sys
+        if sys.stdin.isatty():
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
 
-        choice = input("\nSelect option (1-6): ").strip()
+        user_input = input("\nYou: ").strip()
 
-        if choice == "1":
+        if not user_input:
+            continue
+
+        # Handle commands
+        if user_input.lower() == '/quit':
+            print("👋 Goodbye!")
+            break
+
+        if user_input.lower() == '/help':
+            print_help()
+            continue
+
+        if user_input.lower() == '/new':
             session_id = chat.new_session()
             print(f"✅ New session started: {session_id}")
+            continue
 
-        elif choice == "2":
+        if user_input.lower() == '/resume':
             sessions = chat.list_sessions()
             if not sessions:
-                print("No previous sessions found.")
+                print("❌ No previous sessions found.")
                 continue
 
-            print("\nAvailable sessions:")
+            print("\n📋 Available sessions:")
             for i, session in enumerate(sessions, 1):
                 print(f"{i}. Session: {session['session_id'][:8]}... "
                       f"({session['message_count']} messages, "
@@ -359,14 +389,15 @@ def main():
                 if 0 <= idx < len(sessions):
                     chat.resume_session(sessions[idx]['session_id'])
                 else:
-                    print("Invalid selection.")
+                    print("❌ Invalid selection.")
             except ValueError:
-                print("Invalid input.")
+                print("❌ Invalid input.")
+            continue
 
-        elif choice == "3":
+        if user_input.lower() == '/list':
             sessions = chat.list_sessions()
             if not sessions:
-                print("No sessions found.")
+                print("📋 No sessions found.")
             else:
                 print(f"\n📋 Found {len(sessions)} session(s):")
                 for i, session in enumerate(sessions, 1):
@@ -375,35 +406,51 @@ def main():
                     print(f"   First message: {session['first_timestamp'][:19]}")
                     print(f"   Last message: {session['last_timestamp'][:19]}")
                     print(f"   Preview: {session['preview']}")
+            continue
 
-        elif choice == "4":
-            if not chat.session_id:
-                print("⚠️  No active session. Please start a new session or resume one.")
-                continue
-
-            print("\n💬 Chat (type 'back' to return to menu)")
-            while True:
-                user_input = input("\nYou: ").strip()
-                if user_input.lower() == "back":
-                    break
-                if not user_input:
-                    continue
-
-                response = chat.chat(user_input)
-                print(f"\nAssistant: {response}")
-
-        elif choice == "5":
+        if user_input.lower() == '/info':
             summary = chat.get_session_summary()
             print("\n📊 Session Summary:")
+            print("=" * 60)
             for key, value in summary.items():
                 print(f"   {key}: {value}")
+            print(f"   context_retrieval: {'✅ ON' if use_context else '❌ OFF'}")
+            print("=" * 60)
+            continue
 
-        elif choice == "6":
-            print("👋 Goodbye!")
-            break
+        if user_input.lower() == '/clear':
+            chat.clear_current_session()
+            continue
 
-        else:
-            print("Invalid option. Please try again.")
+        if user_input.lower().startswith('/context'):
+            parts = user_input.split()
+            if len(parts) < 2:
+                print(f"⚠️  Usage: /context on|off (currently: {'ON' if use_context else 'OFF'})")
+                continue
+            if parts[1].lower() == 'on':
+                use_context = True
+                print("✅ Context retrieval enabled")
+            elif parts[1].lower() == 'off':
+                use_context = False
+                print("❌ Context retrieval disabled")
+            else:
+                print("⚠️  Usage: /context on|off")
+            continue
+
+        # Check for unrecognized commands
+        if user_input.startswith('/'):
+            print(f"⚠️  Unrecognized command: {user_input}")
+            print_help()
+            continue
+
+        # Regular chat
+        if not chat.session_id:
+            print("⚠️  No active session. Starting new session automatically.")
+            chat.new_session()
+
+        print("🤖 Assistant: ", end="", flush=True)
+        response = chat.chat(user_input, use_context=use_context)
+        print(response)
 
 
 if __name__ == "__main__":
