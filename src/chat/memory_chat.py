@@ -6,7 +6,8 @@ Supports creating new sessions or resuming previous conversations.
 import os
 import uuid
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable, Any
+from dataclasses import dataclass
 from dotenv import load_dotenv
 
 from langchain_ollama import OllamaEmbeddings
@@ -314,19 +315,214 @@ class VectorMemoryChat:
         print(f"🗑️  Current session cleared (history preserved in vector store)")
 
 
-def print_help():
-    """Print the help message with all available commands."""
-    print("\n📚 Available Commands:")
-    print("=" * 60)
-    print("  /new                - Start a new chat session")
-    print("  /resume             - Resume a previous session")
-    print("  /list               - List all sessions")
-    print("  /info               - View current session info")
-    print("  /clear              - Clear current session memory")
-    print("  /context on|off     - Toggle context retrieval")
-    print("  /help               - Show this help message")
-    print("  /quit               - Exit the chatbot")
-    print("=" * 60)
+@dataclass
+class Command:
+    """Represents a chat command with metadata and handler."""
+    name: str
+    handler: Callable[[Any, str], bool]  # Returns True to continue loop, False to break
+    description: str
+    usage: Optional[str] = None
+    aliases: Optional[List[str]] = None
+
+    def matches(self, input_cmd: str) -> bool:
+        """Check if input matches this command or its aliases."""
+        cmd_lower = input_cmd.lower()
+        if cmd_lower == self.name:
+            return True
+        if self.aliases:
+            return cmd_lower in self.aliases
+        return False
+
+    def get_help_text(self) -> str:
+        """Generate help text for this command."""
+        usage_text = self.usage if self.usage else self.name
+        return f"  /{usage_text:<20} - {self.description}"
+
+
+class CommandRegistry:
+    """Registry for managing chat commands."""
+
+    def __init__(self):
+        self.commands: Dict[str, Command] = {}
+
+    def register(self, command: Command):
+        """Register a command."""
+        self.commands[command.name] = command
+        # Register aliases
+        if command.aliases:
+            for alias in command.aliases:
+                self.commands[alias] = command
+
+    def get(self, name: str) -> Optional[Command]:
+        """Get a command by name or alias."""
+        return self.commands.get(name.lower())
+
+    def get_all(self) -> List[Command]:
+        """Get all unique commands (excluding aliases)."""
+        seen = set()
+        unique_commands = []
+        for cmd in self.commands.values():
+            if cmd.name not in seen:
+                seen.add(cmd.name)
+                unique_commands.append(cmd)
+        return sorted(unique_commands, key=lambda c: c.name)
+
+    def print_help(self):
+        """Print help for all commands."""
+        print("\n📚 Available Commands:")
+        print("=" * 60)
+        for cmd in self.get_all():
+            print(cmd.get_help_text())
+        print("=" * 60)
+
+
+def create_command_handlers(chat: VectorMemoryChat, state: Dict[str, Any]) -> CommandRegistry:
+    """Create and register all command handlers."""
+    registry = CommandRegistry()
+
+    # /quit command
+    def handle_quit(ctx, args):
+        print("👋 Goodbye!")
+        return False  # Exit loop
+
+    registry.register(Command(
+        name="quit",
+        handler=handle_quit,
+        description="Exit the chatbot",
+        aliases=["exit", "q"]
+    ))
+
+    # /help command
+    def handle_help(ctx, args):
+        registry.print_help()
+        return True
+
+    registry.register(Command(
+        name="help",
+        handler=handle_help,
+        description="Show this help message",
+        aliases=["h", "?"]
+    ))
+
+    # /new command
+    def handle_new(ctx, args):
+        session_id = ctx.new_session()
+        print(f"✅ New session started: {session_id}")
+        return True
+
+    registry.register(Command(
+        name="new",
+        handler=handle_new,
+        description="Start a new chat session"
+    ))
+
+    # /resume command
+    def handle_resume(ctx, args):
+        sessions = ctx.list_sessions()
+        if not sessions:
+            print("❌ No previous sessions found.")
+            return True
+
+        print("\n📋 Available sessions:")
+        for i, session in enumerate(sessions, 1):
+            print(f"{i}. Session: {session['session_id'][:8]}... "
+                  f"({session['message_count']} messages, "
+                  f"last active: {session['last_timestamp'][:19]})")
+            print(f"   Preview: {session['preview']}")
+
+        try:
+            idx = int(input(f"\nSelect session (1-{len(sessions)}): ")) - 1
+            if 0 <= idx < len(sessions):
+                ctx.resume_session(sessions[idx]['session_id'])
+            else:
+                print("❌ Invalid selection.")
+        except ValueError:
+            print("❌ Invalid input.")
+        return True
+
+    registry.register(Command(
+        name="resume",
+        handler=handle_resume,
+        description="Resume a previous session"
+    ))
+
+    # /list command
+    def handle_list(ctx, args):
+        sessions = ctx.list_sessions()
+        if not sessions:
+            print("📋 No sessions found.")
+        else:
+            print(f"\n📋 Found {len(sessions)} session(s):")
+            for i, session in enumerate(sessions, 1):
+                print(f"\n{i}. Session ID: {session['session_id']}")
+                print(f"   Messages: {session['message_count']}")
+                print(f"   First message: {session['first_timestamp'][:19]}")
+                print(f"   Last message: {session['last_timestamp'][:19]}")
+                print(f"   Preview: {session['preview']}")
+        return True
+
+    registry.register(Command(
+        name="list",
+        handler=handle_list,
+        description="List all sessions",
+        aliases=["ls"]
+    ))
+
+    # /info command
+    def handle_info(ctx, args):
+        summary = ctx.get_session_summary()
+        print("\n📊 Session Summary:")
+        print("=" * 60)
+        for key, value in summary.items():
+            print(f"   {key}: {value}")
+        print(f"   context_retrieval: {'✅ ON' if state['use_context'] else '❌ OFF'}")
+        print("=" * 60)
+        return True
+
+    registry.register(Command(
+        name="info",
+        handler=handle_info,
+        description="View current session info",
+        aliases=["status"]
+    ))
+
+    # /clear command
+    def handle_clear(ctx, args):
+        ctx.clear_current_session()
+        return True
+
+    registry.register(Command(
+        name="clear",
+        handler=handle_clear,
+        description="Clear current session memory"
+    ))
+
+    # /context command
+    def handle_context(ctx, args):
+        parts = args.split()
+        if len(parts) < 1:
+            current = 'ON' if state['use_context'] else 'OFF'
+            print(f"⚠️  Usage: /context on|off (currently: {current})")
+            return True
+
+        if parts[0].lower() == 'on':
+            state['use_context'] = True
+            print("✅ Context retrieval enabled")
+        elif parts[0].lower() == 'off':
+            state['use_context'] = False
+            print("❌ Context retrieval disabled")
+        else:
+            print("⚠️  Usage: /context on|off")
+        return True
+
+    registry.register(Command(
+        name="context",
+        handler=handle_context,
+        description="Toggle context retrieval",
+        usage="context on|off"
+    ))
+
+    return registry
 
 
 def main():
@@ -339,7 +535,12 @@ def main():
 
     # Initialize chat
     chat = VectorMemoryChat(user_id="alice")
-    use_context = True
+
+    # Shared state accessible by command handlers
+    state = {"use_context": True}
+
+    # Create command registry
+    commands = create_command_handlers(chat, state)
 
     # Start with a new session automatically
     chat.new_session()
@@ -358,89 +559,28 @@ def main():
             continue
 
         # Handle commands
-        if user_input.lower() == '/quit':
-            print("👋 Goodbye!")
-            break
-
-        if user_input.lower() == '/help':
-            print_help()
-            continue
-
-        if user_input.lower() == '/new':
-            session_id = chat.new_session()
-            print(f"✅ New session started: {session_id}")
-            continue
-
-        if user_input.lower() == '/resume':
-            sessions = chat.list_sessions()
-            if not sessions:
-                print("❌ No previous sessions found.")
-                continue
-
-            print("\n📋 Available sessions:")
-            for i, session in enumerate(sessions, 1):
-                print(f"{i}. Session: {session['session_id'][:8]}... "
-                      f"({session['message_count']} messages, "
-                      f"last active: {session['last_timestamp'][:19]})")
-                print(f"   Preview: {session['preview']}")
-
-            try:
-                idx = int(input(f"\nSelect session (1-{len(sessions)}): ")) - 1
-                if 0 <= idx < len(sessions):
-                    chat.resume_session(sessions[idx]['session_id'])
-                else:
-                    print("❌ Invalid selection.")
-            except ValueError:
-                print("❌ Invalid input.")
-            continue
-
-        if user_input.lower() == '/list':
-            sessions = chat.list_sessions()
-            if not sessions:
-                print("📋 No sessions found.")
-            else:
-                print(f"\n📋 Found {len(sessions)} session(s):")
-                for i, session in enumerate(sessions, 1):
-                    print(f"\n{i}. Session ID: {session['session_id']}")
-                    print(f"   Messages: {session['message_count']}")
-                    print(f"   First message: {session['first_timestamp'][:19]}")
-                    print(f"   Last message: {session['last_timestamp'][:19]}")
-                    print(f"   Preview: {session['preview']}")
-            continue
-
-        if user_input.lower() == '/info':
-            summary = chat.get_session_summary()
-            print("\n📊 Session Summary:")
-            print("=" * 60)
-            for key, value in summary.items():
-                print(f"   {key}: {value}")
-            print(f"   context_retrieval: {'✅ ON' if use_context else '❌ OFF'}")
-            print("=" * 60)
-            continue
-
-        if user_input.lower() == '/clear':
-            chat.clear_current_session()
-            continue
-
-        if user_input.lower().startswith('/context'):
-            parts = user_input.split()
-            if len(parts) < 2:
-                print(f"⚠️  Usage: /context on|off (currently: {'ON' if use_context else 'OFF'})")
-                continue
-            if parts[1].lower() == 'on':
-                use_context = True
-                print("✅ Context retrieval enabled")
-            elif parts[1].lower() == 'off':
-                use_context = False
-                print("❌ Context retrieval disabled")
-            else:
-                print("⚠️  Usage: /context on|off")
-            continue
-
-        # Check for unrecognized commands
         if user_input.startswith('/'):
-            print(f"⚠️  Unrecognized command: {user_input}")
-            print_help()
+            # Parse command and arguments
+            parts = user_input[1:].split(maxsplit=1)
+
+            # Handle empty command (just "/")
+            if not parts or not parts[0]:
+                print("⚠️  Empty command.")
+                commands.print_help()
+                continue
+
+            cmd_name = parts[0]
+            cmd_args = parts[1] if len(parts) > 1 else ""
+
+            # Find and execute command
+            command = commands.get(cmd_name)
+            if command:
+                should_continue = command.handler(chat, cmd_args)
+                if not should_continue:
+                    break
+            else:
+                print(f"⚠️  Unrecognized command: /{cmd_name}")
+                commands.print_help()
             continue
 
         # Regular chat
@@ -449,7 +589,7 @@ def main():
             chat.new_session()
 
         print("🤖 Assistant: ", end="", flush=True)
-        response = chat.chat(user_input, use_context=use_context)
+        response = chat.chat(user_input, use_context=state['use_context'])
         print(response)
 
 
