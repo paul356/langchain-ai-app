@@ -91,37 +91,52 @@ class VectorMemoryChat:
             bool: True if session found and loaded, False otherwise
         """
         # Query vector store for messages from this session
-        results = self.vectorstore.similarity_search(
-            query="",  # Empty query to get all
-            k=100,  # Get many results
-            filter={
-                "user_id": self.user_id,
-                "session_id": session_id
-            }
-        )
+        try:
+            # Use get() with filter to retrieve all matching documents
+            results = self.vectorstore.get(
+                where={
+                    "$and": [
+                        {"user_id": {"$eq": self.user_id}},
+                        {"session_id": {"$eq": session_id}}
+                    ]
+                }
+            )
 
-        if not results:
-            print(f"❌ No history found for session: {session_id}")
+            if not results or not results['ids']:
+                print(f"❌ No history found for session: {session_id}")
+                return False
+
+            # Combine into document-like objects
+            documents = []
+            for i in range(len(results['ids'])):
+                doc = {
+                    'content': results['documents'][i],
+                    'metadata': results['metadatas'][i]
+                }
+                documents.append(doc)
+
+            # Sort by timestamp
+            sorted_docs = sorted(documents, key=lambda x: x['metadata'].get("timestamp", ""))
+
+            # Rebuild chat history
+            self.session_id = session_id
+            self.current_history = ChatMessageHistory()
+
+            for doc in sorted_docs:
+                msg_type = doc['metadata'].get("message_type")
+                content = doc['content']
+
+                if msg_type == "human":
+                    self.current_history.add_user_message(content)
+                elif msg_type == "ai":
+                    self.current_history.add_ai_message(content)
+
+            print(f"✅ Resumed session: {session_id} ({len(sorted_docs)} messages loaded)")
+            return True
+
+        except Exception as e:
+            print(f"❌ Error resuming session: {e}")
             return False
-
-        # Sort by timestamp
-        sorted_results = sorted(results, key=lambda x: x.metadata.get("timestamp", ""))
-
-        # Rebuild chat history
-        self.session_id = session_id
-        self.current_history = ChatMessageHistory()
-
-        for doc in sorted_results:
-            msg_type = doc.metadata.get("message_type")
-            content = doc.page_content
-
-            if msg_type == "human":
-                self.current_history.add_user_message(content)
-            elif msg_type == "ai":
-                self.current_history.add_ai_message(content)
-
-        print(f"✅ Resumed session: {session_id} ({len(sorted_results)} messages loaded)")
-        return True
 
     def list_sessions(self) -> List[Dict]:
         """
@@ -130,39 +145,48 @@ class VectorMemoryChat:
         Returns:
             List of session info dictionaries
         """
-        # Get all documents for this user
-        results = self.vectorstore.similarity_search(
-            query="",
-            k=1000,
-            filter={"user_id": self.user_id}
-        )
+        try:
+            # Get all documents for this user using get() method
+            results = self.vectorstore.get(
+                where={"user_id": {"$eq": self.user_id}}
+            )
 
-        # Group by session_id
-        sessions = {}
-        for doc in results:
-            sid = doc.metadata.get("session_id")
-            if sid not in sessions:
-                sessions[sid] = {
-                    "session_id": sid,
-                    "message_count": 0,
-                    "first_timestamp": doc.metadata.get("timestamp"),
-                    "last_timestamp": doc.metadata.get("timestamp"),
-                    "preview": doc.page_content[:50] + "..." if len(doc.page_content) > 50 else doc.page_content
-                }
-            sessions[sid]["message_count"] += 1
+            if not results or not results['ids']:
+                return []
 
-            # Update timestamps
-            current_ts = doc.metadata.get("timestamp")
-            if current_ts:
-                if current_ts < sessions[sid]["first_timestamp"]:
-                    sessions[sid]["first_timestamp"] = current_ts
-                    sessions[sid]["preview"] = doc.page_content[:50] + "..." if len(doc.page_content) > 50 else doc.page_content
-                if current_ts > sessions[sid]["last_timestamp"]:
-                    sessions[sid]["last_timestamp"] = current_ts
+            # Group by session_id
+            sessions = {}
+            for i in range(len(results['ids'])):
+                metadata = results['metadatas'][i]
+                content = results['documents'][i]
+                sid = metadata.get("session_id")
 
-        # Sort by last timestamp (most recent first)
-        session_list = sorted(sessions.values(), key=lambda x: x["last_timestamp"], reverse=True)
-        return session_list
+                if sid not in sessions:
+                    sessions[sid] = {
+                        "session_id": sid,
+                        "message_count": 0,
+                        "first_timestamp": metadata.get("timestamp"),
+                        "last_timestamp": metadata.get("timestamp"),
+                        "preview": content[:50] + "..." if len(content) > 50 else content
+                    }
+                sessions[sid]["message_count"] += 1
+
+                # Update timestamps
+                current_ts = metadata.get("timestamp")
+                if current_ts:
+                    if current_ts < sessions[sid]["first_timestamp"]:
+                        sessions[sid]["first_timestamp"] = current_ts
+                        sessions[sid]["preview"] = content[:50] + "..." if len(content) > 50 else content
+                    if current_ts > sessions[sid]["last_timestamp"]:
+                        sessions[sid]["last_timestamp"] = current_ts
+
+            # Sort by last timestamp (most recent first)
+            session_list = sorted(sessions.values(), key=lambda x: x["last_timestamp"], reverse=True)
+            return session_list
+
+        except Exception as e:
+            print(f"❌ Error listing sessions: {e}")
+            return []
 
     def _save_to_vector_store(self, message: str, message_type: str):
         """Save a message to the vector store with metadata."""
