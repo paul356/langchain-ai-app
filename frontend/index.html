@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vector Memory Chat</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🧠 Vector Memory Chat</h1>
+                <p class="subtitle">AI Chat with Persistent Memory & Knowledge Base</p>
+            </div>
+            <div class="header-controls">
+                <button id="settingsBtn" class="icon-btn" title="Settings">⚙️</button>
+                <button id="sessionsBtn" class="icon-btn" title="Sessions">📋</button>
+                <button id="uploadBtn" class="icon-btn" title="Upload Documents">📁</button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <div class="sidebar-header">
+                    <h3>Session Info</h3>
+                    <button id="closeSidebarBtn" class="close-btn">✕</button>
+                </div>
+                <div class="session-info">
+                    <div class="info-item">
+                        <span class="label">User ID:</span>
+                        <span class="value" id="userIdDisplay">default_user</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Session ID:</span>
+                        <span class="value" id="sessionIdDisplay">None</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Messages:</span>
+                        <span class="value" id="messageCount">0</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Context:</span>
+                        <span class="value" id="contextStatus">✅ ON</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Knowledge:</span>
+                        <span class="value" id="knowledgeStatus">✅ ON</span>
+                    </div>
+                </div>
+                <div class="sidebar-actions">
+                    <button id="newSessionBtn" class="btn-secondary">🆕 New Session</button>
+                    <button id="clearSessionBtn" class="btn-secondary">🗑️ Clear Session</button>
+                </div>
+            </aside>
+
+            <!-- Chat Area -->
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages">
+                    <div class="welcome-message">
+                        <h2>👋 Welcome to Vector Memory Chat!</h2>
+                        <p>Start a conversation and your messages will be stored with semantic search capabilities.</p>
+                        <ul>
+                            <li>💭 Context-aware responses using conversation history</li>
+                            <li>📚 Upload documents to build a knowledge base</li>
+                            <li>🔄 Resume previous conversations anytime</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Chat Input -->
+                <div class="chat-input-container">
+                    <div class="input-wrapper">
+                        <textarea
+                            id="messageInput"
+                            placeholder="Type your message here..."
+                            rows="1"
+                        ></textarea>
+                        <button id="sendBtn" class="send-btn" title="Send message">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="input-options">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="useContext" checked>
+                            <span>Use Context</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="useKnowledge" checked>
+                            <span>Use Knowledge Base</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+
+    <!-- Sessions Modal -->
+    <div id="sessionsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 Previous Sessions</h2>
+                <button class="close-btn" onclick="closeModal('sessionsModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="sessionsList" class="sessions-list">
+                    <p class="loading">Loading sessions...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div id="uploadModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📁 Upload Documents</h2>
+                <button class="close-btn" onclick="closeModal('uploadModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-section">
+                    <p>Upload documents to the knowledge base (.txt, .pdf)</p>
+                    <input type="file" id="fileInput" accept=".txt,.pdf" multiple>
+                    <button id="uploadFileBtn" class="btn-primary">Upload Files</button>
+                </div>
+                <div class="upload-status" id="uploadStatus"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ Settings</h2>
+                <button class="close-btn" onclick="closeModal('settingsModal')">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-form">
+                    <div class="form-group">
+                        <label for="apiUrl">API URL:</label>
+                        <input type="text" id="apiUrl" value="http://localhost:8000">
+                    </div>
+                    <div class="form-group">
+                        <label for="userId">User ID:</label>
+                        <input type="text" id="userId" value="default_user">
+                    </div>
+                    <button id="saveSettingsBtn" class="btn-primary">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

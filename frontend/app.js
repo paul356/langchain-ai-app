@@ -1,0 +1,462 @@
+// API Configuration
+// When served from FastAPI, use relative URLs; otherwise use localhost
+let API_URL = localStorage.getItem('apiUrl') || window.location.origin;
+let USER_ID = localStorage.getItem('userId') || 'default_user';
+let SESSION_ID = null;
+let USE_CONTEXT = true;
+let USE_KNOWLEDGE = true;
+
+// DOM Elements
+const chatMessages = document.getElementById('chatMessages');
+const messageInput = document.getElementById('messageInput');
+const sendBtn = document.getElementById('sendBtn');
+const useContextCheckbox = document.getElementById('useContext');
+const useKnowledgeCheckbox = document.getElementById('useKnowledge');
+const userIdDisplay = document.getElementById('userIdDisplay');
+const sessionIdDisplay = document.getElementById('sessionIdDisplay');
+const messageCount = document.getElementById('messageCount');
+const contextStatus = document.getElementById('contextStatus');
+const knowledgeStatus = document.getElementById('knowledgeStatus');
+
+// Button Elements
+const settingsBtn = document.getElementById('settingsBtn');
+const sessionsBtn = document.getElementById('sessionsBtn');
+const uploadBtn = document.getElementById('uploadBtn');
+const newSessionBtn = document.getElementById('newSessionBtn');
+const clearSessionBtn = document.getElementById('clearSessionBtn');
+const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+const saveSettingsBtn = document.getElementById('saveSettingsBtn');
+const uploadFileBtn = document.getElementById('uploadFileBtn');
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    initializeApp();
+    setupEventListeners();
+    createNewSession();
+});
+
+function initializeApp() {
+    userIdDisplay.textContent = USER_ID;
+    document.getElementById('userId').value = USER_ID;
+    document.getElementById('apiUrl').value = API_URL;
+
+    USE_CONTEXT = useContextCheckbox.checked;
+    USE_KNOWLEDGE = useKnowledgeCheckbox.checked;
+}
+
+function setupEventListeners() {
+    // Send message
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    // Auto-resize textarea
+    messageInput.addEventListener('input', () => {
+        messageInput.style.height = 'auto';
+        messageInput.style.height = messageInput.scrollHeight + 'px';
+    });
+
+    // Checkboxes
+    useContextCheckbox.addEventListener('change', (e) => {
+        USE_CONTEXT = e.target.checked;
+        updateContextStatus();
+    });
+
+    useKnowledgeCheckbox.addEventListener('change', (e) => {
+        USE_KNOWLEDGE = e.target.checked;
+        updateKnowledgeStatus();
+    });
+
+    // Buttons
+    settingsBtn.addEventListener('click', () => openModal('settingsModal'));
+    sessionsBtn.addEventListener('click', () => {
+        openModal('sessionsModal');
+        loadSessions();
+    });
+    uploadBtn.addEventListener('click', () => openModal('uploadModal'));
+    newSessionBtn.addEventListener('click', createNewSession);
+    clearSessionBtn.addEventListener('click', clearSession);
+    closeSidebarBtn.addEventListener('click', toggleSidebar);
+    saveSettingsBtn.addEventListener('click', saveSettings);
+    uploadFileBtn.addEventListener('click', uploadFiles);
+}
+
+// API Functions
+async function apiRequest(endpoint, options = {}) {
+    try {
+        const response = await fetch(`${API_URL}${endpoint}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            },
+            ...options
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'API request failed');
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('API Error:', error);
+        showNotification('Error: ' + error.message, 'error');
+        throw error;
+    }
+}
+
+async function sendMessage() {
+    const message = messageInput.value.trim();
+    if (!message) return;
+
+    // Disable input
+    messageInput.disabled = true;
+    sendBtn.disabled = true;
+
+    // Add user message to UI
+    addMessageToUI(message, 'user');
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+
+    // Show typing indicator
+    const typingId = showTypingIndicator();
+
+    try {
+        const response = await apiRequest('/chat', {
+            method: 'POST',
+            body: JSON.stringify({
+                message: message,
+                user_id: USER_ID,
+                session_id: SESSION_ID,
+                use_context: USE_CONTEXT,
+                use_knowledge: USE_KNOWLEDGE
+            })
+        });
+
+        // Update session ID
+        SESSION_ID = response.session_id;
+        updateSessionInfo();
+
+        // Remove typing indicator and add response
+        removeTypingIndicator(typingId);
+        addMessageToUI(response.response, 'assistant');
+
+    } catch (error) {
+        removeTypingIndicator(typingId);
+        addMessageToUI('Sorry, there was an error processing your message.', 'assistant');
+    } finally {
+        messageInput.disabled = false;
+        sendBtn.disabled = false;
+        messageInput.focus();
+    }
+}
+
+async function createNewSession() {
+    try {
+        const response = await apiRequest('/session/new', {
+            method: 'POST',
+            body: JSON.stringify({ user_id: USER_ID })
+        });
+
+        SESSION_ID = response.session_id;
+        clearMessagesUI();
+        updateSessionInfo();
+        showNotification('New session created!', 'success');
+    } catch (error) {
+        showNotification('Failed to create session', 'error');
+    }
+}
+
+async function loadSessions() {
+    const sessionsList = document.getElementById('sessionsList');
+    sessionsList.innerHTML = '<p class="loading">Loading sessions...</p>';
+
+    try {
+        const response = await apiRequest(`/session/list?user_id=${USER_ID}`);
+
+        if (response.sessions.length === 0) {
+            sessionsList.innerHTML = '<p>No previous sessions found.</p>';
+            return;
+        }
+
+        sessionsList.innerHTML = '';
+        response.sessions.forEach(session => {
+            const sessionItem = createSessionItem(session);
+            sessionsList.appendChild(sessionItem);
+        });
+    } catch (error) {
+        sessionsList.innerHTML = '<p class="error">Failed to load sessions.</p>';
+    }
+}
+
+async function resumeSession(sessionId) {
+    try {
+        await apiRequest('/session/resume', {
+            method: 'POST',
+            body: JSON.stringify({
+                user_id: USER_ID,
+                session_id: sessionId
+            })
+        });
+
+        SESSION_ID = sessionId;
+        clearMessagesUI();
+        updateSessionInfo();
+        closeModal('sessionsModal');
+        showNotification('Session resumed!', 'success');
+    } catch (error) {
+        showNotification('Failed to resume session', 'error');
+    }
+}
+
+async function clearSession() {
+    if (!confirm('Clear current session? (History will be preserved in database)')) return;
+
+    try {
+        await apiRequest('/session/clear', {
+            method: 'POST',
+            body: JSON.stringify({ user_id: USER_ID })
+        });
+
+        clearMessagesUI();
+        showNotification('Session cleared!', 'success');
+    } catch (error) {
+        showNotification('Failed to clear session', 'error');
+    }
+}
+
+async function uploadFiles() {
+    const fileInput = document.getElementById('fileInput');
+    const files = fileInput.files;
+
+    if (files.length === 0) {
+        showNotification('Please select files to upload', 'error');
+        return;
+    }
+
+    const uploadStatus = document.getElementById('uploadStatus');
+    uploadStatus.className = 'upload-status';
+    uploadStatus.textContent = 'Uploading...';
+
+    for (const file of files) {
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('user_id', USER_ID);
+
+            const response = await fetch(`${API_URL}/knowledge/upload`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                uploadStatus.className = 'upload-status success';
+                uploadStatus.textContent = `✅ ${result.message}`;
+            } else {
+                uploadStatus.className = 'upload-status error';
+                uploadStatus.textContent = `❌ ${result.message}`;
+            }
+        } catch (error) {
+            uploadStatus.className = 'upload-status error';
+            uploadStatus.textContent = `❌ Failed to upload ${file.name}`;
+        }
+    }
+
+    fileInput.value = '';
+    setTimeout(() => {
+        uploadStatus.textContent = '';
+        uploadStatus.className = 'upload-status';
+    }, 3000);
+}
+
+async function updateSessionInfo() {
+    try {
+        const response = await apiRequest(`/session/info?user_id=${USER_ID}`);
+
+        sessionIdDisplay.textContent = SESSION_ID ? SESSION_ID.substring(0, 8) + '...' : 'None';
+        sessionIdDisplay.title = SESSION_ID || 'No active session';
+        messageCount.textContent = response.message_count || 0;
+    } catch (error) {
+        console.error('Failed to update session info:', error);
+    }
+}
+
+// UI Functions
+function addMessageToUI(content, role) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role}`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.textContent = content;
+
+    const time = document.createElement('div');
+    time.className = 'message-time';
+    time.textContent = new Date().toLocaleTimeString();
+
+    bubble.appendChild(time);
+    messageDiv.appendChild(bubble);
+
+    // Remove welcome message if exists
+    const welcomeMessage = chatMessages.querySelector('.welcome-message');
+    if (welcomeMessage) {
+        welcomeMessage.remove();
+    }
+
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    // Update message count
+    const count = chatMessages.querySelectorAll('.message').length;
+    messageCount.textContent = count;
+}
+
+function showTypingIndicator() {
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'message assistant';
+    typingDiv.id = 'typing-indicator-' + Date.now();
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+
+    const typing = document.createElement('div');
+    typing.className = 'typing-indicator';
+    typing.innerHTML = '<span></span><span></span><span></span>';
+
+    bubble.appendChild(typing);
+    typingDiv.appendChild(bubble);
+    chatMessages.appendChild(typingDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+
+    return typingDiv.id;
+}
+
+function removeTypingIndicator(id) {
+    const indicator = document.getElementById(id);
+    if (indicator) indicator.remove();
+}
+
+function clearMessagesUI() {
+    chatMessages.innerHTML = `
+        <div class="welcome-message">
+            <h2>👋 Welcome Back!</h2>
+            <p>Continue your conversation or start a new one.</p>
+        </div>
+    `;
+    messageCount.textContent = '0';
+}
+
+function createSessionItem(session) {
+    const div = document.createElement('div');
+    div.className = 'session-item';
+    div.onclick = () => resumeSession(session.session_id);
+
+    div.innerHTML = `
+        <div class="session-item-header">
+            <span class="session-id">${session.session_id.substring(0, 16)}...</span>
+            <span class="session-stats">${session.message_count} messages</span>
+        </div>
+        <div class="session-stats">Last active: ${new Date(session.last_timestamp).toLocaleString()}</div>
+        <div class="session-preview">${session.preview}</div>
+    `;
+
+    return div;
+}
+
+function updateContextStatus() {
+    contextStatus.textContent = USE_CONTEXT ? '✅ ON' : '❌ OFF';
+}
+
+function updateKnowledgeStatus() {
+    knowledgeStatus.textContent = USE_KNOWLEDGE ? '✅ ON' : '❌ OFF';
+}
+
+function saveSettings() {
+    const newApiUrl = document.getElementById('apiUrl').value.trim();
+    const newUserId = document.getElementById('userId').value.trim();
+
+    if (newApiUrl) {
+        API_URL = newApiUrl;
+        localStorage.setItem('apiUrl', API_URL);
+    }
+
+    if (newUserId) {
+        USER_ID = newUserId;
+        localStorage.setItem('userId', USER_ID);
+        userIdDisplay.textContent = USER_ID;
+    }
+
+    closeModal('settingsModal');
+    showNotification('Settings saved!', 'success');
+}
+
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    sidebar.classList.toggle('hidden');
+}
+
+// Modal Functions
+function openModal(modalId) {
+    const modal = document.getElementById(modalId);
+    modal.classList.add('active');
+}
+
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    modal.classList.remove('active');
+}
+
+// Close modal when clicking outside
+window.addEventListener('click', (e) => {
+    if (e.target.classList.contains('modal')) {
+        e.target.classList.remove('active');
+    }
+});
+
+// Notification Function
+function showNotification(message, type = 'info') {
+    // Simple console notification - can be enhanced with a toast library
+    console.log(`[${type.toUpperCase()}] ${message}`);
+
+    // You could add a toast notification here
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        background: ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#4a90e2'};
+        color: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        z-index: 2000;
+        animation: slideIn 0.3s ease;
+    `;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease';
+        setTimeout(() => notification.remove(), 300);
+    }, 3000);
+}
+
+// Add animations to CSS dynamically
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+    }
+`;
+document.head.appendChild(style);

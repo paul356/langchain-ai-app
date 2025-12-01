@@ -7,8 +7,11 @@ import os
 import sys
 from typing import Optional, List, Dict
 from datetime import datetime
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 import tempfile
 import shutil
@@ -89,6 +92,14 @@ app.add_middleware(
 # In-memory storage for active chat instances (keyed by user_id)
 active_chats: Dict[str, VectorMemoryChat] = {}
 
+# Get the path to the frontend directory
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+
+# Mount static files for the frontend
+if FRONTEND_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+
 
 def get_or_create_chat(user_id: str) -> VectorMemoryChat:
     """Get existing chat instance or create a new one for the user."""
@@ -97,9 +108,17 @@ def get_or_create_chat(user_id: str) -> VectorMemoryChat:
     return active_chats[user_id]
 
 
-@app.get("/", response_model=StatusResponse)
+@app.get("/")
 async def root():
-    """Root endpoint - API status check."""
+    """Root endpoint - Serve the frontend."""
+    if FRONTEND_DIR.exists() and (FRONTEND_DIR / "index.html").exists():
+        return FileResponse(str(FRONTEND_DIR / "index.html"))
+    return RedirectResponse(url="/docs")
+
+
+@app.get("/api/status", response_model=StatusResponse)
+async def api_status():
+    """API status check endpoint."""
     return StatusResponse(
         status="online",
         message="Vector Memory Chat API is running"
