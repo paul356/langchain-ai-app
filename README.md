@@ -14,21 +14,25 @@ A gradually increasing complexity AI application built with LangChain, starting 
 - [x] Prompt templates
 - [x] Conversation flow
 
-### 📝 Phase 3: Memory & Context
-- [ ] Conversation memory
-- [ ] Different memory types
-- [ ] Context management
+### ✅ Phase 3: Memory & Context
+- [x] Conversation memory
+- [x] Vector database memory (ChromaDB)
+- [x] Session management
+- [x] Context retrieval from chat history
 
-### 📚 Phase 4: Document Q&A (RAG)
-- [ ] Document processing
-- [ ] Vector embeddings
-- [ ] Retrieval system
-- [ ] Question answering
+### ✅ Phase 4: Document Q&A (RAG)
+- [x] Document processing (.txt, .pdf)
+- [x] Vector embeddings (Ollama)
+- [x] Knowledge base storage
+- [x] Retrieval system
+- [x] Context-aware question answering
 
-### 🌐 Phase 5: Web Interface
-- [ ] FastAPI backend
-- [ ] REST API endpoints
-- [ ] Document upload
+### ✅ Phase 5: Web Interface
+- [x] FastAPI backend
+- [x] REST API endpoints
+- [x] Document upload
+- [x] Session management API
+- [x] Knowledge base API
 
 ### 🤖 Phase 6: Agents & Tools
 - [ ] LangChain agents

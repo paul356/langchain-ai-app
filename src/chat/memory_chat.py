@@ -10,10 +10,18 @@ from typing import Optional, List, Dict, Callable, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
+
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+import glob
+import mimetypes
+try:
+    from PyPDF2 import PdfReader
+except ImportError:
+    PdfReader = None
 
 load_dotenv()
 
@@ -44,14 +52,87 @@ class VectorMemoryChat:
             base_url=ollama_url
         )
 
-        # Setup vector store for persistent memory
+
+        # Setup vector store for persistent memory (chat)
         self.vectorstore = Chroma(
             collection_name="chat_history",
             embedding_function=self.embeddings,
             persist_directory="./chroma_chat_db"
         )
 
+        # Setup vector store for knowledge base (separate collection)
+        self.knowledge_store = Chroma(
+            collection_name="knowledge_base",
+            embedding_function=self.embeddings,
+            persist_directory="./chroma_chat_db"
+        )
+
         print(f"✅ Vector Memory Chat initialized for user: {user_id}")
+
+    def upload_document(self, file_path: str, chunk_size: int = 1000, chunk_overlap: int = 100):
+        """
+        Upload and index a document into the knowledge base.
+        Supports .txt and .pdf files.
+        """
+        if not os.path.isfile(file_path):
+            print(f"❌ File not found: {file_path}")
+            return False
+
+        ext = os.path.splitext(file_path)[1].lower()
+        mimetype, _ = mimetypes.guess_type(file_path)
+        text = ""
+        if ext == ".txt" or (mimetype and mimetype.startswith("text")):
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                text = f.read()
+        elif ext == ".pdf" and PdfReader:
+            with open(file_path, "rb") as f:
+                reader = PdfReader(f)
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        else:
+            print(f"❌ Unsupported file type: {file_path}")
+            return False
+
+        if not text.strip():
+            print(f"❌ No text extracted from: {file_path}")
+            return False
+
+        splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        docs = splitter.split_text(text)
+        metadatas = [{
+            "user_id": self.user_id,
+            "source": os.path.basename(file_path),
+            "file_ext": ext,
+        }] * len(docs)
+        self.knowledge_store.add_texts(texts=docs, metadatas=metadatas)
+        print(f"✅ Uploaded and indexed {len(docs)} chunks from {file_path}")
+        return True
+
+    def upload_documents_from_folder(self, folder_path: str = "./data"):
+        """
+        Upload all supported documents from a folder to the knowledge base.
+        """
+        supported_exts = [".txt", ".pdf"]
+        files = []
+        for ext in supported_exts:
+            files.extend(glob.glob(os.path.join(folder_path, f"*{ext}")))
+        if not files:
+            print(f"❌ No supported documents found in {folder_path}")
+            return 0
+        count = 0
+        for f in files:
+            if self.upload_document(f):
+                count += 1
+        print(f"✅ Uploaded {count} documents from {folder_path}")
+        return count
+
+    def retrieve_knowledge(self, query: str, k: int = 3) -> str:
+        """
+        Retrieve relevant knowledge base chunks for a query.
+        """
+        results = self.knowledge_store.similarity_search(query=query, k=k, filter={"user_id": {"$eq": self.user_id}})
+        if not results:
+            return ""
+        return "\n".join([f"[KB] {doc.metadata.get('source', '')}: {doc.page_content}" for doc in results])
 
     def _setup_llm(self):
         """Setup LLM based on configuration."""
@@ -244,7 +325,7 @@ class VectorMemoryChat:
 
         return "\n".join(context_parts)
 
-    def chat(self, user_input: str, use_context: bool = True) -> str:
+    def chat(self, user_input: str, use_context: bool = True, use_knowledge: bool = True) -> str:
         """
         Send a message and get a response.
 
@@ -263,20 +344,26 @@ class VectorMemoryChat:
         self.current_history.add_user_message(user_input)
         self._save_to_vector_store(user_input, "human")
 
-        # Build prompt with context
+        # Build prompt with context and knowledge
         prompt_parts = []
 
-        # Add relevant context if enabled
+        # Add relevant knowledge base context if enabled
+        if use_knowledge:
+            kb_context = self.retrieve_knowledge(user_input, k=3)
+            if kb_context:
+                prompt_parts.append(f"Relevant knowledge base info:\n{kb_context}\n")
+
+        # Add relevant chat context if enabled
         if use_context and len(self.current_history.messages) > 2:
             relevant_context = self._get_relevant_context(user_input, k=3)
             if relevant_context:
-                prompt_parts.append(f"Relevant context from earlier:\n{relevant_context}\n")
+                prompt_parts.append(f"Relevant chat context:\n{relevant_context}\n")
 
         # Add recent conversation history (last 5 exchanges)
-        recent_messages = self.current_history.messages[-10:]  # Last 5 exchanges (10 messages)
+        recent_messages = self.current_history.messages[-10:]
         if recent_messages:
             prompt_parts.append("Recent conversation:")
-            for msg in recent_messages[:-1]:  # Exclude the current message
+            for msg in recent_messages[:-1]:
                 if isinstance(msg, HumanMessage):
                     prompt_parts.append(f"User: {msg.content}")
                 elif isinstance(msg, AIMessage):
@@ -377,8 +464,27 @@ class CommandRegistry:
 
 
 def create_command_handlers(chat: VectorMemoryChat, state: Dict[str, Any]) -> CommandRegistry:
-    """Create and register all command handlers."""
     registry = CommandRegistry()
+
+    # /upload command
+    def handle_upload(ctx, args):
+        path = args.strip()
+        if not path:
+            print("⚠️  Usage: /upload <file_path> or /upload folder <folder_path>")
+            return True
+        if path.startswith("folder "):
+            folder = path[len("folder "):].strip()
+            ctx.upload_documents_from_folder(folder)
+        else:
+            ctx.upload_document(path)
+        return True
+
+    registry.register(Command(
+        name="upload",
+        handler=handle_upload,
+        description="Upload a document or folder to the knowledge base",
+        usage="upload <file_path> | upload folder <folder_path>"
+    ))
 
     # /quit command
     def handle_quit(ctx, args):
@@ -499,19 +605,15 @@ def create_command_handlers(chat: VectorMemoryChat, state: Dict[str, Any]) -> Co
 
     # /context command
     def handle_context(ctx, args):
-        parts = args.split()
-        if len(parts) < 1:
-            current = 'ON' if state['use_context'] else 'OFF'
-            print(f"⚠️  Usage: /context on|off (currently: {current})")
-            return True
-
-        if parts[0].lower() == 'on':
+        if args.lower() == "on":
             state['use_context'] = True
             print("✅ Context retrieval enabled")
-        elif parts[0].lower() == 'off':
+        elif args.lower() == "off":
             state['use_context'] = False
             print("❌ Context retrieval disabled")
         else:
+            current_status = "ON" if state['use_context'] else "OFF"
+            print(f"📊 Context retrieval is currently: {current_status}")
             print("⚠️  Usage: /context on|off")
         return True
 
