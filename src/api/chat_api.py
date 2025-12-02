@@ -255,6 +255,32 @@ async def get_session_info(user_id: str = "default_user"):
         raise HTTPException(status_code=500, detail=f"Error getting session info: {str(e)}")
 
 
+@app.get("/session/history")
+async def get_session_history(user_id: str = "default_user", session_id: str = None):
+    """
+    Get the full message history for a session.
+
+    - **user_id**: User identifier
+    - **session_id**: Session ID to retrieve history for
+    """
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    try:
+        chat_instance = get_or_create_chat(user_id)
+        history = chat_instance.get_session_history(session_id)
+
+        return {
+            "session_id": session_id,
+            "user_id": user_id,
+            "history": history,
+            "count": len(history)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting session history: {str(e)}")
+
+
 @app.post("/session/clear")
 async def clear_session(request: SessionRequest):
     """

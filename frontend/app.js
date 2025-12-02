@@ -1,3 +1,5 @@
+console.log('=== app.js loading ===');
+
 // API Configuration
 // When served from FastAPI, use relative URLs; otherwise use localhost
 let API_URL = localStorage.getItem('apiUrl') || window.location.origin;
@@ -5,6 +7,8 @@ let USER_ID = localStorage.getItem('userId') || 'default_user';
 let SESSION_ID = null;
 let USE_CONTEXT = true;
 let USE_KNOWLEDGE = true;
+
+console.log('API_URL:', API_URL);
 
 // DOM Elements
 const chatMessages = document.getElementById('chatMessages');
@@ -28,11 +32,20 @@ const closeSidebarBtn = document.getElementById('closeSidebarBtn');
 const saveSettingsBtn = document.getElementById('saveSettingsBtn');
 const uploadFileBtn = document.getElementById('uploadFileBtn');
 
+console.log('closeSidebarBtn element:', closeSidebarBtn);
+console.log('closeSidebarBtn exists:', closeSidebarBtn !== null);
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     initializeApp();
     setupEventListeners();
     createNewSession();
+
+    // Check if sidebar is hidden and create restore button if needed
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('hidden')) {
+        createRestoreSidebarButton();
+    }
 });
 
 function initializeApp() {
@@ -80,7 +93,15 @@ function setupEventListeners() {
     uploadBtn.addEventListener('click', () => openModal('uploadModal'));
     newSessionBtn.addEventListener('click', createNewSession);
     clearSessionBtn.addEventListener('click', clearSession);
-    closeSidebarBtn.addEventListener('click', toggleSidebar);
+
+    // Close sidebar button with null check
+    if (closeSidebarBtn) {
+        closeSidebarBtn.addEventListener('click', toggleSidebar);
+        console.log('Close sidebar button listener added');
+    } else {
+        console.error('closeSidebarBtn not found!');
+    }
+
     saveSettingsBtn.addEventListener('click', saveSettings);
     uploadFileBtn.addEventListener('click', uploadFiles);
 }
@@ -205,11 +226,43 @@ async function resumeSession(sessionId) {
 
         SESSION_ID = sessionId;
         clearMessagesUI();
+
+        // Load chat history for the session
+        await loadChatHistory(sessionId);
+
         updateSessionInfo();
         closeModal('sessionsModal');
         showNotification('Session resumed!', 'success');
     } catch (error) {
         showNotification('Failed to resume session', 'error');
+    }
+}
+
+async function loadChatHistory(sessionId) {
+    try {
+        const response = await apiRequest(`/session/history?user_id=${USER_ID}&session_id=${sessionId}`);
+
+        if (response.history && response.history.length > 0) {
+            // Clear welcome message
+            chatMessages.innerHTML = '';
+
+            // Add a timeline header
+            const timelineHeader = document.createElement('div');
+            timelineHeader.className = 'timeline-header';
+            timelineHeader.innerHTML = '<h3>📜 Chat History</h3><div class="timeline-line"></div>';
+            chatMessages.appendChild(timelineHeader);
+
+            // Add each message to the timeline
+            response.history.forEach((msg, index) => {
+                const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleString() : 'Unknown time';
+                addHistoryMessageToUI(msg.role, msg.content, timestamp, index);
+            });
+
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    } catch (error) {
+        console.error('Failed to load chat history:', error);
+        // Continue without history if it fails
     }
 }
 
@@ -294,7 +347,10 @@ function addMessageToUI(content, role) {
 
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
-    bubble.textContent = content;
+
+    // Process content for <think> tags
+    const processedContent = processThinkTags(content);
+    bubble.innerHTML = processedContent;
 
     const time = document.createElement('div');
     time.className = 'message-time';
@@ -315,6 +371,75 @@ function addMessageToUI(content, role) {
     // Update message count
     const count = chatMessages.querySelectorAll('.message').length;
     messageCount.textContent = count;
+}
+
+function addHistoryMessageToUI(role, content, timestamp, index) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${role} history-message`;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+
+    // Process content for <think> tags
+    const processedContent = processThinkTags(content);
+    bubble.innerHTML = processedContent;
+
+    const time = document.createElement('div');
+    time.className = 'message-time';
+    time.textContent = timestamp;
+
+    bubble.appendChild(time);
+    messageDiv.appendChild(bubble);
+
+    chatMessages.appendChild(messageDiv);
+}
+
+function processThinkTags(content) {
+    // Check if content contains <think> tags
+    const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+
+    if (!thinkRegex.test(content)) {
+        // No think tags, return escaped content
+        return escapeHtml(content);
+    }
+
+    // Process content with think tags
+    let processed = escapeHtml(content);
+    processed = processed.replace(/&lt;think&gt;([\s\S]*?)&lt;\/think&gt;/g, (match, thinkContent) => {
+        const thinkId = 'think-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        return `
+            <div class="think-container">
+                <div class="think-header" onclick="toggleThink('${thinkId}')">
+                    <span class="think-toggle" id="${thinkId}-toggle">▸</span>
+                    <span class="think-label">Expand to view think process</span>
+                </div>
+                <div class="think-content" id="${thinkId}" style="display: none;">
+                    ${thinkContent.trim()}
+                </div>
+            </div>
+        `;
+    });
+
+    return processed;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function toggleThink(thinkId) {
+    const content = document.getElementById(thinkId);
+    const toggle = document.getElementById(thinkId + '-toggle');
+
+    if (content.style.display === 'none') {
+        content.style.display = 'block';
+        toggle.textContent = '▾';
+    } else {
+        content.style.display = 'none';
+        toggle.textContent = '▸';
+    }
 }
 
 function showTypingIndicator() {
@@ -398,7 +523,53 @@ function saveSettings() {
 
 function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
+    let restoreBtn = document.getElementById('restoreSidebarBtn');
+
     sidebar.classList.toggle('hidden');
+
+    // Show/hide restore button
+    if (sidebar.classList.contains('hidden')) {
+        if (!restoreBtn) {
+            createRestoreSidebarButton();
+        } else {
+            restoreBtn.style.display = 'flex';
+        }
+    } else {
+        if (restoreBtn) {
+            restoreBtn.style.display = 'none';
+        }
+    }
+}
+
+function createRestoreSidebarButton() {
+    const restoreBtn = document.createElement('button');
+    restoreBtn.id = 'restoreSidebarBtn';
+    restoreBtn.className = 'restore-sidebar-btn';
+    restoreBtn.innerHTML = '📊';
+    restoreBtn.title = 'Show Session Info';
+    restoreBtn.onclick = toggleSidebar;
+
+    // Add inline styles to ensure visibility
+    restoreBtn.style.cssText = `
+        position: fixed !important;
+        left: 20px !important;
+        bottom: 100px !important;
+        width: 50px !important;
+        height: 50px !important;
+        border-radius: 50% !important;
+        border: none !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        font-size: 24px !important;
+        cursor: pointer !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+        z-index: 9999 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    `;
+
+    document.body.appendChild(restoreBtn);
 }
 
 // Modal Functions

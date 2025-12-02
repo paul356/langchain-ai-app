@@ -396,6 +396,52 @@ class VectorMemoryChat:
             "active": True
         }
 
+    def get_session_history(self, session_id: str) -> List[Dict]:
+        """Get all messages from a specific session.
+
+        Args:
+            session_id: The session ID to retrieve history for
+
+        Returns:
+            List of message dictionaries with role, content, and timestamp
+        """
+        try:
+            # Query vector store for messages from this session
+            results = self.vectorstore.get(
+                where={
+                    "$and": [
+                        {"user_id": {"$eq": self.user_id}},
+                        {"session_id": {"$eq": session_id}}
+                    ]
+                }
+            )
+
+            if not results or not results['ids']:
+                return []
+
+            # Combine into message objects
+            messages = []
+            for i in range(len(results['ids'])):
+                metadata = results['metadatas'][i]
+                content = results['documents'][i]
+
+                msg_type = metadata.get("message_type")
+                role = "user" if msg_type == "human" else "assistant"
+
+                messages.append({
+                    "role": role,
+                    "content": content,
+                    "timestamp": metadata.get("timestamp", "")
+                })
+
+            # Sort by timestamp
+            messages.sort(key=lambda x: x.get("timestamp", ""))
+            return messages
+
+        except Exception as e:
+            print(f"❌ Error getting session history: {e}")
+            return []
+
     def clear_current_session(self):
         """Clear the current session from memory (keeps in vector store)."""
         self.current_history = ChatMessageHistory()

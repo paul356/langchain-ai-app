@@ -102,6 +102,8 @@ body {
 
 .sidebar.hidden {
     transform: translateX(-100%);
+    position: absolute;
+    left: -300px;
 }
 
 .sidebar-header {
@@ -121,6 +123,15 @@ body {
     font-size: 24px;
     color: var(--text-secondary);
     cursor: pointer;
+    padding: 5px;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.close-btn:hover {
+    background: rgba(220, 53, 69, 0.1);
+    color: var(--danger-color);
+    transform: scale(1.1);
 }
 
 .session-info {
@@ -531,4 +542,119 @@ body {
 
 .chat-messages::-webkit-scrollbar-thumb:hover {
     background: var(--primary-color);
+}
+
+/* Timeline Styles */
+.timeline-header {
+    text-align: center;
+    margin: 20px 0 30px 0;
+    position: relative;
+}
+
+.timeline-header h3 {
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    font-size: 18px;
+}
+
+.timeline-line {
+    position: absolute;
+    left: 50%;
+    top: 50px;
+    bottom: -20px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--primary-color), transparent);
+    transform: translateX(-50%);
+    z-index: 0;
+}
+
+.history-message {
+    position: relative;
+    z-index: 1;
+}
+
+/* Think Container Styles */
+.think-container {
+    margin: 4px 0;
+    border: none;
+    border-radius: 0;
+    overflow: hidden;
+    background: transparent;
+}
+
+.think-header {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 4px;
+    background: transparent;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.2s;
+    opacity: 0.6;
+}
+
+.think-header:hover {
+    opacity: 0.8;
+}
+
+.think-icon {
+    font-size: 10px;
+    color: #999;
+}
+
+.think-label {
+    flex: 1;
+    font-weight: 400;
+    color: #999;
+    font-size: 11px;
+    font-style: italic;
+}
+
+.think-toggle {
+    color: #999;
+    font-size: 8px;
+    transition: transform 0.3s;
+}
+
+.think-content {
+    padding: 12px;
+    background: white;
+    border-top: 1px solid #e0e0e0;
+    color: #333;
+    line-height: 1.6;
+    font-size: 14px;
+    white-space: pre-wrap;
+    font-family: 'Courier New', monospace;
+}
+
+/* Restore Sidebar Button */
+.restore-sidebar-btn {
+    position: fixed;
+    left: 20px;
+    bottom: 100px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    border: none;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    font-size: 24px;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    transition: all 0.3s;
+    z-index: 1500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.3s ease;
+}
+
+.restore-sidebar-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+
+.restore-sidebar-btn:active {
+    transform: scale(0.95);
 }
