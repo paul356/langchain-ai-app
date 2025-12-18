@@ -4,14 +4,16 @@ Supports creating new sessions or resuming previous conversations.
 """
 
 import os
+import sys
 import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Callable, Any
 from dataclasses import dataclass
 from dotenv import load_dotenv
 
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
@@ -23,35 +25,33 @@ try:
 except ImportError:
     PdfReader = None
 
+# Import common model factory
+from models import get_llm, get_embeddings, ModelConfig
+
 load_dotenv()
 
 
 class VectorMemoryChat:
     """Chat system with vector database memory and session management."""
 
-    def __init__(self, user_id: str = "default_user", model_type: str = "ollama"):
+    def __init__(self, user_id: str = "default_user", config: Optional[ModelConfig] = None):
         """
         Initialize chat with vector memory.
 
         Args:
             user_id: Unique identifier for the user
-            model_type: Type of LLM to use ("ollama" or "openai")
+            config: ModelConfig instance. If None, loads from environment variables.
         """
         self.user_id = user_id
-        self.model_type = model_type
+        self.config = config or ModelConfig.from_env()
         self.session_id = None
         self.current_history = ChatMessageHistory()
 
         # Setup LLM
-        self.llm = self._setup_llm()
+        self.llm = get_llm(self.config)
 
-        # Setup embeddings (use Ollama for local embeddings)
-        ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.embeddings = OllamaEmbeddings(
-            model="nomic-embed-text",  # Fast, efficient embedding model
-            base_url=ollama_url
-        )
-
+        # Setup embeddings (use config or default to Ollama)
+        self.embeddings = get_embeddings(self.config)
 
         # Setup vector store for persistent memory (chat)
         self.vectorstore = Chroma(
@@ -134,21 +134,7 @@ class VectorMemoryChat:
             return ""
         return "\n".join([f"[KB] {doc.metadata.get('source', '')}: {doc.page_content}" for doc in results])
 
-    def _setup_llm(self):
-        """Setup LLM based on configuration."""
-        ollama_url = os.getenv("OLLAMA_BASE_URL")
-        if self.model_type == "ollama" or ollama_url:
-            from langchain_ollama import OllamaLLM
-            model = os.getenv("MODEL_NAME", "qwen2.5:latest")
-            base_url = ollama_url or "http://localhost:11434"
-            print(f"🔧 Using Ollama: {base_url} with model: {model}")
-            return OllamaLLM(model=model, base_url=base_url)
-        else:
-            from langchain_openai import ChatOpenAI
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY not found")
-            return ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7, api_key=api_key)
+
 
     def new_session(self) -> str:
         """

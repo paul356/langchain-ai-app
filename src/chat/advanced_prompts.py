@@ -4,8 +4,12 @@ Demonstrates different prompting strategies.
 """
 
 import os
-from typing import List, Dict, Any
+import sys
+from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.prompts import (
     ChatPromptTemplate,
@@ -17,6 +21,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.output_parsers import StrOutputParser, PydanticOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from pydantic import BaseModel, Field
+
+# Import common model factory
+from models import get_llm, ModelConfig
 
 load_dotenv()
 
@@ -31,10 +38,10 @@ class PersonalityResponse(BaseModel):
 class AdvancedChatBot:
     """Chatbot with advanced prompting techniques."""
 
-    def __init__(self, model_type: str = "ollama"):
+    def __init__(self, config: Optional[ModelConfig] = None):
         """Initialize with different prompting strategies."""
-        self.model_type = model_type
-        self.llm = self._setup_llm()
+        self.config = config or ModelConfig.from_env()
+        self.llm = get_llm(self.config)
         self.chat_history = []
         # Feature flags - multiple can be active at once
         self.features = {
@@ -51,21 +58,7 @@ class AdvancedChatBot:
         }
         self.conversation_summary = None  # Stores summary of older conversations
 
-    def _setup_llm(self):
-        """Setup LLM - prefer Ollama if configured."""
-        ollama_url = os.getenv("OLLAMA_BASE_URL")
-        if self.model_type == "ollama" or ollama_url:
-            from langchain_ollama import OllamaLLM
-            model = os.getenv("MODEL_NAME", "qwen3:latest")
-            base_url = ollama_url or "http://localhost:11434"
-            print(f"🔧 Advanced prompts using Ollama: {base_url} with model: {model}")
-            return OllamaLLM(model=model, base_url=base_url)
-        else:
-            from langchain_openai import ChatOpenAI
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY not found")
-            return ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7, api_key=api_key)
+
 
     def _format_history(self):
         """Format chat history into a list of messages with flow management."""

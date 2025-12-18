@@ -87,18 +87,109 @@ cp .env.template .env
 python src/main.py
 ```
 
-## API Keys Required
+## Model Configuration
 
-- **OpenAI API Key**: For GPT models (get from https://platform.openai.com/)
-- **LangSmith API Key**: For tracing (optional, get from https://smith.langchain.com/)
+This application supports multiple LLM providers through a unified model factory:
 
-## Alternative: Local Models
+### Supported Providers
 
-You can also use local models with Ollama instead of OpenAI:
+1. **OpenAI** - GPT-3.5, GPT-4, and other OpenAI models
+2. **Ollama** - Local models (Llama2, Mistral, Qwen3, etc.)
+3. **Qwen** - Alibaba Cloud's Qwen models via Dashscope API
 
+### Configuration
+
+Configure your model by setting environment variables in `.env`:
+
+```bash
+# Copy the example configuration
+cp .env.example .env
+
+# Edit .env with your preferred model provider
+```
+
+#### Option 1: OpenAI Models
+
+```bash
+MODEL_PROVIDER=openai
+MODEL_NAME=gpt-3.5-turbo
+OPENAI_API_KEY=your_openai_api_key
+```
+
+Get your API key from: https://platform.openai.com/api-keys
+
+#### Option 2: Local Ollama Models
+
+```bash
+MODEL_PROVIDER=ollama
+MODEL_NAME=qwen3:latest
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+Setup Ollama:
 1. Install Ollama: https://ollama.ai/
-2. Pull a model: `ollama pull llama2`
-3. Update .env to use local model
+2. Pull a model: `ollama pull qwen3:latest`
+3. Start Ollama service (usually runs automatically)
+
+#### Option 3: Qwen Cloud API (Recommended for Qwen3-max)
+
+```bash
+MODEL_PROVIDER=qwen
+MODEL_NAME=qwen-max
+QWEN_API_KEY=your_dashscope_api_key
+```
+
+Get your API key from: https://dashscope.console.aliyun.com/
+
+**Available Qwen Models:**
+- `qwen-max` - Latest and most capable model
+- `qwen3-max` - Latest Qwen 3 series model
+- `qwen-plus` - Balanced performance and cost
+- `qwen-turbo` - Fast and cost-effective
+- `qwen-long` - Extended context window (10M tokens)
+
+### Embedding Model Configuration
+
+Configure embeddings for vector database and RAG:
+
+```bash
+# Choose embedding provider
+EMBEDDING_PROVIDER=ollama  # Options: openai, ollama, dashscope
+
+# Set embedding model (provider-specific)
+# - OpenAI: text-embedding-3-small, text-embedding-3-large
+# - Ollama: nomic-embed-text, mxbai-embed-large
+# - Dashscope: text-embedding-v1, text-embedding-v2, text-embedding-v3
+EMBEDDING_MODEL=nomic-embed-text
+```
+
+**Recommended Configurations:**
+- **Local (Free)**: `EMBEDDING_PROVIDER=ollama` with `EMBEDDING_MODEL=nomic-embed-text`
+- **Cloud (OpenAI)**: `EMBEDDING_PROVIDER=openai` with `EMBEDDING_MODEL=text-embedding-3-small`
+- **Cloud (Dashscope)**: `EMBEDDING_PROVIDER=dashscope` with `EMBEDDING_MODEL=text-embedding-v3` or `text-embedding-v4`
+
+### Additional Configuration
+
+```bash
+# Adjust model temperature (0.0-1.0)
+MODEL_TEMPERATURE=0.7
+```
+
+### Quick Start
+
+```bash
+# Interactive setup wizard
+python test_model_config.py --setup
+
+# Or test existing configuration
+python test_model_config.py
+```
+
+### Documentation
+
+- 📖 **[Quick Start Guide](docs/QUICK_START.md)** - Get started in 2 minutes
+- 📚 **[Complete Model Configuration Guide](docs/MODEL_CONFIGURATION.md)** - Detailed setup and troubleshooting
+- 🔢 **[Embedding Configuration Guide](docs/EMBEDDING_CONFIGURATION.md)** - Configure embeddings for vector databases and RAG
 
 ## Usage Examples
 

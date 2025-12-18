@@ -3,6 +3,9 @@ langchain-openai==1.0.1
 langchain-community==0.4.1
 langchain-ollama==0.3.10
 python-dotenv==1.2.1
+
+# Qwen model support (uses OpenAI-compatible API via Dashscope)
+# No additional package needed - uses langchain-openai with custom base_url
 pydantic>=2.0.0
 fastapi==0.120.1
 uvicorn==0.38.0
