@@ -1,3 +1,7 @@
+# MIT License
+# Copyright (c) 2025 github.com/paul356
+# See LICENSE file for full license text
+
 """
 FastAPI backend for Vector Memory Chat system.
 Provides REST API endpoints for chat, session management, and knowledge base operations.

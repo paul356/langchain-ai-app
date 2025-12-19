@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# MIT License
+# Copyright (c) 2025 github.com/paul356
+# See LICENSE file for full license text
+
 """Quick test of vector memory chat functionality."""
 
 import sys

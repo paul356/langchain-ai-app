@@ -1,3 +1,7 @@
+# MIT License
+# Copyright (c) 2025 github.com/paul356
+# See LICENSE file for full license text
+
 """
 Advanced prompt templates and techniques for LangChain.
 Demonstrates different prompting strategies.

@@ -1,3 +1,7 @@
+# MIT License
+# Copyright (c) 2025 github.com/paul356
+# See LICENSE file for full license text
+
 """
 Test client for Vector Memory Chat API.
 Demonstrates how to interact with the FastAPI endpoints.

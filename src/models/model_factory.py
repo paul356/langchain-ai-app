@@ -1,3 +1,7 @@
+# MIT License
+# Copyright (c) 2025 github.com/paul356
+# See LICENSE file for full license text
+
 """
 Common model factory for LangChain AI Application.
 Supports OpenAI, Ollama, and Qwen models with configuration via environment variables.

@@ -1,3 +1,7 @@
+# MIT License
+# Copyright (c) 2025 github.com/paul356
+# See LICENSE file for full license text
+
 """
 Chat system with vector database memory and session management.
 Supports creating new sessions or resuming previous conversations.
