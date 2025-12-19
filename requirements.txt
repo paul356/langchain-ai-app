@@ -6,6 +6,7 @@ python-dotenv==1.2.1
 
 # Qwen model support (uses OpenAI-compatible API via Dashscope)
 # No additional package needed - uses langchain-openai with custom base_url
+dashscope>=1.14.0
 pydantic>=2.0.0
 fastapi==0.120.1
 uvicorn==0.38.0

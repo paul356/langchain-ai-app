@@ -364,11 +364,17 @@ class VectorMemoryChat:
         # Get response from LLM
         response = self.llm.invoke(full_prompt)
 
-        # Add AI response to history
-        self.current_history.add_ai_message(response)
-        self._save_to_vector_store(response, "ai")
+        # Extract content from AIMessage if needed
+        if isinstance(response, AIMessage):
+            response_text = response.content
+        else:
+            response_text = str(response)
 
-        return response
+        # Add AI response to history
+        self.current_history.add_ai_message(response_text)
+        self._save_to_vector_store(response_text, "ai")
+
+        return response_text
 
     def get_session_summary(self) -> Dict:
         """Get summary of the current session."""

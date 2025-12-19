@@ -104,7 +104,14 @@ if FRONTEND_DIR.exists():
 def get_or_create_chat(user_id: str) -> VectorMemoryChat:
     """Get existing chat instance or create a new one for the user."""
     if user_id not in active_chats:
-        active_chats[user_id] = VectorMemoryChat(user_id=user_id)
+        print(f"🔍 DEBUG: Creating new VectorMemoryChat instance for user: {user_id}")
+        try:
+            active_chats[user_id] = VectorMemoryChat(user_id=user_id)
+            print(f"🔍 DEBUG: VectorMemoryChat instance created successfully")
+        except Exception as e:
+            import traceback
+            print(f"❌ Error creating VectorMemoryChat: {str(e)}\n{traceback.format_exc()}")
+            raise
     return active_chats[user_id]
 
 
@@ -175,8 +182,11 @@ async def create_session(request: SessionRequest):
     - **user_id**: User identifier
     """
     try:
+        print(f"🔍 DEBUG: Creating session for user_id: {request.user_id}")
         chat_instance = get_or_create_chat(request.user_id)
+        print(f"🔍 DEBUG: Chat instance created, calling new_session()")
         session_id = chat_instance.new_session()
+        print(f"🔍 DEBUG: Session created: {session_id}")
 
         return {
             "session_id": session_id,
@@ -185,7 +195,10 @@ async def create_session(request: SessionRequest):
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error creating session: {str(e)}")
+        import traceback
+        error_detail = f"Error creating session: {str(e)}\n{traceback.format_exc()}"
+        print(f"❌ {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
 
 @app.post("/session/resume")
